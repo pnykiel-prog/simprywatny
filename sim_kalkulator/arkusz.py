@@ -1736,13 +1736,8 @@ def _wrazliwosc(wb: Workbook, wynik: Wynik, analiza: Optional[Analiza]) -> None:
 # Eksport
 # ===========================================================================
 
-def eksportuj(
-    wynik: Wynik, sciezka: Path | str, analiza: Optional[Analiza] = None
-) -> Path:
-    """Buduje skoroszyt z formulami i zapisuje go pod wskazana sciezka."""
-    sciezka = Path(sciezka)
-    sciezka.parent.mkdir(parents=True, exist_ok=True)
-
+def zbuduj_skoroszyt(wynik: Wynik, analiza: Optional[Analiza] = None) -> Workbook:
+    """Buduje skoroszyt z formulami. Nic nie zapisuje."""
     wb = Workbook()
     wb.remove(wb.active)
     rej = Rejestr()
@@ -1763,5 +1758,24 @@ def eksportuj(
         "Rekompensata", "Werdykty", "Wrazliwosc", "Podstawy_prawne",
     ]
     wb._sheets = [wb[nazwa] for nazwa in kolejnosc if nazwa in wb.sheetnames]
-    wb.save(sciezka)
+    return wb
+
+
+def eksportuj(
+    wynik: Wynik, sciezka: Path | str, analiza: Optional[Analiza] = None
+) -> Path:
+    """Buduje skoroszyt i zapisuje go pod wskazana sciezka."""
+    sciezka = Path(sciezka)
+    sciezka.parent.mkdir(parents=True, exist_ok=True)
+    zbuduj_skoroszyt(wynik, analiza).save(sciezka)
     return sciezka
+
+
+def eksportuj_do_strumienia(wynik: Wynik, strumien, analiza: Optional[Analiza] = None):
+    """Zapisuje skoroszyt do strumienia bajtow.
+
+    Potrzebne tam, gdzie nie ma zapisywalnego systemu plikow — na przyklad
+    w funkcji serverless, gdzie arkusz wraca prosto do przegladarki.
+    """
+    zbuduj_skoroszyt(wynik, analiza).save(strumien)
+    return strumien

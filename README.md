@@ -49,9 +49,45 @@ trzy werdykty przeliczane na żywo, obok wykres z punktem granicznym.
 Bez serwera:
 
 ```bash
-python3 -m pytest -q                      # 321 testów
+python3 -m pytest -q                      # 347 testów
 python3 -m pytest -q -m "not wolne"       # bez LibreOffice
 ```
+
+---
+
+## Wdrożenie (Vercel)
+
+Repozytorium jest gotowe do wdrożenia bez konfiguracji w panelu — wystarczy
+podpiąć projekt do repo. Vercel wykryje funkcje w `api/` i `requirements.txt`.
+
+```
+api/index.py       →  /            (rewrite z vercel.json) — serwuje web/index.html
+api/przelicz.py    →  /api/przelicz
+api/sweep.py       →  /api/sweep
+api/parametry.py   →  /api/parametry
+api/arkusz.py      →  /api/arkusz
+```
+
+Każda funkcja to kilka linijek — cała mechanika siedzi w
+`sim_kalkulator/serverless.py`, a obliczenia w `sim_kalkulator/api.py`, z którego
+korzysta też serwer lokalny. **Jeden silnik obsługuje oba środowiska.**
+
+Wariant startowy zmienia się zmienną środowiskową `SIM_WEJSCIE` (ścieżka
+względem korzenia repozytorium, domyślnie `przyklady/domykajacy_sie.yaml`).
+
+### Czym wdrożenie różni się od uruchomienia lokalnego
+
+Środowisko serverless jest bezstanowe i ma system plików tylko do odczytu, więc:
+
+- **Arkusz wraca strumieniem do przeglądarki**, zamiast być zapisywany w
+  `wyniki/`. Przycisk pobiera parę plików — `.xlsx` oraz `.yaml` z użytym
+  zestawem parametrów, żeby dało się odtworzyć, na czym liczono. Lokalnie
+  serwer dodatkowo odkłada tę parę na dysk.
+- **Nic nie jest pamiętane między żądaniami.** Każde wywołanie dostaje komplet
+  parametrów bazowych i własny zestaw zmian; UI trzyma stan suwaka u siebie.
+
+Pełny sweep z rankingiem parametrów liczy się w ok. 0,5 s, więc mieści się
+w limitach czasu funkcji z dużym zapasem.
 
 ---
 
@@ -107,7 +143,10 @@ pilnuje tego test `test_ui_nie_liczy_niczego_poza_formatowaniem`.
 | `sim_kalkulator/wrazliwosc.py` | sweep udziału pul, punkt graniczny, ranking |
 | `sim_kalkulator/arkusz.py` | eksport XLSX z formułami |
 | `sim_kalkulator/silnik.py` | orkiestrator — jedno pełne przeliczenie |
+| `sim_kalkulator/api.py` | warstwa API bez HTTP — wspólna dla obu środowisk |
+| `sim_kalkulator/serverless.py` | adapter funkcji serverless |
 | `serwer.py`, `web/index.html` | lokalny serwer HTTP i jednoplikowy UI |
+| `api/*.py`, `vercel.json` | funkcje i trasowanie wdrożenia |
 | `scripts/recalc.py` | przeliczenie arkusza i kontrola błędów formuł |
 
 ### Zasady, których kod pilnuje

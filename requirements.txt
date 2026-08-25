@@ -1,0 +1,4 @@
+# Zaleznosci silnika. openpyxl jest potrzebny do eksportu arkusza z formulami,
+# pyyaml do wczytania parametrow. Poza tym silnik stoi na bibliotece standardowej.
+openpyxl==3.1.5
+PyYAML==6.0.2

@@ -201,7 +201,7 @@ button.wtorny{background:#fff;color:var(--akcent);border:1px solid var(--akcent)
       <div id="parametry" style="margin-top:12px"></div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px">
         <button id="btn-zastosuj">Zastosuj i przelicz</button>
-        <button id="btn-arkusz" class="wtorny">Generuj arkusz i zapisz parametry</button>
+        <button id="btn-arkusz" class="wtorny">Pobierz arkusz i użyte parametry</button>
       </div>
       <div id="komunikat" class="komunikat" hidden></div>
     </details>
@@ -456,13 +456,39 @@ $("#btn-zastosuj").addEventListener("click", async () => {
   await przelicz();
   await odswiezSweep();
 });
+function pobierz(nazwa, dane, typ) {
+  // Blob + tymczasowy odnosnik — dziala tak samo lokalnie i na wdrozeniu,
+  // gdzie system plikow serwera jest tylko do odczytu.
+  const url = URL.createObjectURL(new Blob([dane], {type: typ}));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = nazwa;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+function base64NaBajty(b64) {
+  const surowe = atob(b64);
+  const bajty = new Uint8Array(surowe.length);
+  for (let i = 0; i < surowe.length; i++) bajty[i] = surowe.charCodeAt(i);
+  return bajty;
+}
+
 $("#btn-arkusz").addEventListener("click", async (ev) => {
   const btn = ev.currentTarget;
+  const etykieta = btn.textContent;
   btn.disabled = true;
+  btn.textContent = "Generowanie…";
   const kom = $("#komunikat");
   kom.hidden = true;
   try {
     const odp = await api("/api/arkusz", {zmiany: biezaceZmiany()});
+    // Arkusz i uzyty zestaw parametrow — zeby dalo sie odtworzyc, na czym liczono.
+    pobierz(odp.nazwa + ".xlsx", base64NaBajty(odp.arkusz_base64),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    pobierz(odp.nazwa + ".yaml", odp.parametry_yaml, "text/yaml;charset=utf-8");
     kom.textContent = odp.komunikat;
     kom.hidden = false;
     pokazBlad("");
@@ -470,6 +496,7 @@ $("#btn-arkusz").addEventListener("click", async (ev) => {
     pokazBlad(e.message);
   } finally {
     btn.disabled = false;
+    btn.textContent = etykieta;
   }
 });
 
