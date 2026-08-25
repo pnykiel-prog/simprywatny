@@ -61,12 +61,30 @@ Repozytorium jest gotowe do wdrożenia bez konfiguracji w panelu — wystarczy
 podpiąć projekt do repo. Vercel wykryje funkcje w `api/` i `requirements.txt`.
 
 ```
-api/index.py       →  /            (rewrite z vercel.json) — serwuje web/index.html
+web/index.html     →  /              serwowany statycznie (outputDirectory)
 api/przelicz.py    →  /api/przelicz
 api/sweep.py       →  /api/sweep
 api/parametry.py   →  /api/parametry
 api/arkusz.py      →  /api/arkusz
+api/diag.py        →  /api/diag      funkcja serwisowa — stan paczki funkcji
+api/index.py       →  /api/index     ta sama strona podana przez funkcje
 ```
+
+**Interfejs idzie statycznie, nie przez Pythona.** Gdy funkcja padnie, strona
+i tak się wyświetli i pokaże komunikat błędu z API, zamiast pustego ekranu.
+
+**`includeFiles` w `vercel.json` jest obowiązkowe.** Builder Pythona nie dokłada
+do paczki funkcji plików spoza katalogu `api/`, a funkcje potrzebują trzech
+rzeczy z zewnątrz: pakietu `sim_kalkulator/`, pliku `web/index.html` i katalogu
+`przyklady/`. Bez tego funkcja kończy się `ModuleNotFoundError` — test
+`test_paczka_bez_include_files_by_sie_wysypala` pilnuje, żeby to nie wróciło.
+
+### Gdy wdrożenie nie działa
+
+Otwórz `/api/diag`. Endpoint mówi wprost, czego brakuje w paczce funkcji:
+wersję Pythona, katalog roboczy, obecność pakietu silnika, interfejsu
+i parametrów oraz wynik próbnego przeliczenia. Nie ujawnia zmiennych
+środowiskowych. `"ok": true` oznacza kompletną paczkę.
 
 Każda funkcja to kilka linijek — cała mechanika siedzi w
 `sim_kalkulator/serverless.py`, a obliczenia w `sim_kalkulator/api.py`, z którego

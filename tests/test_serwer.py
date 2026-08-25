@@ -50,9 +50,24 @@ class TestStronaGlowna:
         assert "<title>Kalkulator montażu" in tresc
 
     def test_ui_nie_ma_zaleznosci_zewnetrznych_z_sieci(self, adres):
+        import re
+
         tresc = (Path(serwer.WEB) / "index.html").read_text(encoding="utf-8")
+        # Data-URI wycinamy przed sprawdzeniem: identyfikator przestrzeni nazw
+        # SVG wyglada jak adres, ale niczego nie pobiera.
+        bez_data_uri = re.sub(r'href="data:[^"]*"', 'href="data:"', tresc)
         for wzorzec in ("http://", "https://", "cdn.", "<script src", '<link rel="stylesheet"'):
-            assert wzorzec not in tresc, f"UI siega po zasob zewnetrzny: {wzorzec}"
+            assert wzorzec not in bez_data_uri, f"UI siega po zasob zewnetrzny: {wzorzec}"
+
+    def test_ui_nie_pobiera_niczego_z_obcego_zrodla(self, adres):
+        import re
+
+        tresc = (Path(serwer.WEB) / "index.html").read_text(encoding="utf-8")
+        zrodla = re.findall(r'(?:src|href)="([^"]+)"', tresc)
+        for zrodlo in zrodla:
+            assert zrodlo.startswith("data:") or zrodlo.startswith("/") or zrodlo.startswith("#"), (
+                f"UI odwoluje sie do zasobu spoza wlasnego pochodzenia: {zrodlo}"
+            )
 
     def test_ui_nie_liczy_niczego_poza_formatowaniem(self, adres):
         # Jeden silnik. W JavaScripcie nie ma prawa byc zadnej stalej z ustawy.

@@ -24,6 +24,16 @@ API = KORZEN / "api"
 AKCJE = ("przelicz", "sweep", "parametry", "arkusz")
 
 
+def konfiguracja():
+    return json.loads((KORZEN / "vercel.json").read_text(encoding="utf-8"))
+
+
+def wzorce_include():
+    """Katalogi, ktore vercel.json kaze dolozyc do paczki funkcji."""
+    wzorzec = konfiguracja()["functions"]["api/*.py"]["includeFiles"]
+    return [w.strip().split("/")[0] for w in wzorzec.strip("{}").split(",")]
+
+
 def zaladuj(nazwa):
     sciezka = API / f"{nazwa}.py"
     spec = importlib.util.spec_from_file_location(f"api_{nazwa}", sciezka)
@@ -77,13 +87,27 @@ class TestStrukturaKatalogu:
 
 class TestKonfiguracja:
     def test_vercel_json_jest_poprawnym_jsonem(self):
-        dane = json.loads((KORZEN / "vercel.json").read_text(encoding="utf-8"))
-        assert "rewrites" in dane
+        assert isinstance(konfiguracja(), dict)
 
-    def test_korzen_prowadzi_do_strony(self):
-        dane = json.loads((KORZEN / "vercel.json").read_text(encoding="utf-8"))
-        zrodla = {r["source"]: r["destination"] for r in dane["rewrites"]}
-        assert zrodla.get("/") == "/api/index"
+    def test_interfejs_serwowany_statycznie(self):
+        # Strona nie zalezy od Pythona: gdy funkcja padnie, uzytkownik i tak
+        # zobaczy interfejs i komunikat bledu z API, zamiast pustego ekranu.
+        katalog = konfiguracja()["outputDirectory"]
+        assert (KORZEN / katalog / "index.html").exists()
+
+    def test_include_files_pokrywa_wszystko_spoza_api(self):
+        # Builder Pythona nie dowozi automatycznie plikow spoza katalogu api/.
+        # Brak ktoregokolwiek z tych katalogow konczy sie ModuleNotFoundError
+        # albo brakiem parametrow w czasie dzialania funkcji.
+        assert set(wzorce_include()) >= {"sim_kalkulator", "przyklady", "web"}
+
+    def test_vercelignore_nie_wyklucza_niczego_potrzebnego(self):
+        wykluczone = {
+            w.strip().rstrip("/")
+            for w in (KORZEN / ".vercelignore").read_text(encoding="utf-8").splitlines()
+            if w.strip() and not w.startswith("#")
+        }
+        assert wykluczone.isdisjoint(set(wzorce_include()))
 
     def test_requirements_pokrywa_zaleznosci_spoza_biblioteki_standardowej(self):
         tresc = (KORZEN / "requirements.txt").read_text(encoding="utf-8").lower()
@@ -94,6 +118,95 @@ class TestKonfiguracja:
         # Zaleznosci testowe nie maja po co jechac na wdrozenie.
         tresc = (KORZEN / "requirements.txt").read_text(encoding="utf-8").lower()
         assert "pytest" not in tresc
+
+
+class TestPaczkaFunkcji:
+    """Symulacja paczki Vercela: do katalogu trafia TYLKO to, co obejmuje
+    includeFiles, plus api/. Tak wlasnie wyglada srodowisko funkcji."""
+
+    @staticmethod
+    @pytest.fixture(scope="class")
+    def paczka(tmp_path_factory):
+        import shutil
+
+        cel = tmp_path_factory.mktemp("paczka")
+        shutil.copytree(KORZEN / "api", cel / "api")
+        for katalog in wzorce_include():
+            zrodlo = KORZEN / katalog
+            if zrodlo.is_dir():
+                shutil.copytree(
+                    zrodlo, cel / katalog, ignore=shutil.ignore_patterns("__pycache__")
+                )
+        return cel
+
+    def test_funkcja_startuje_w_paczce(self, paczka):
+        import subprocess
+        import sys as _sys
+
+        skrypt = (
+            "import importlib.util,sys;from pathlib import Path;"
+            "spec=importlib.util.spec_from_file_location('fn',"
+            "Path(sys.argv[1])/'api'/'przelicz.py');"
+            "m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m);"
+            "print('handler' if hasattr(m,'handler') else 'brak')"
+        )
+        r = subprocess.run(
+            [_sys.executable, "-c", skrypt, str(paczka)],
+            cwd=paczka, capture_output=True, text=True, timeout=120,
+        )
+        assert r.returncode == 0, r.stderr[-800:]
+        assert r.stdout.strip() == "handler"
+
+    def test_paczka_bez_include_files_by_sie_wysypala(self, tmp_path):
+        # Dowod, ze includeFiles nie jest ozdoba — bez niego funkcja nie
+        # potrafi zaimportowac silnika. To byla przyczyna nieudanego wdrozenia.
+        import shutil
+        import subprocess
+        import sys as _sys
+
+        shutil.copytree(KORZEN / "api", tmp_path / "api")
+        skrypt = (
+            "import importlib.util,sys;from pathlib import Path;"
+            "spec=importlib.util.spec_from_file_location('fn',"
+            "Path(sys.argv[1])/'api'/'przelicz.py');"
+            "m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)"
+        )
+        r = subprocess.run(
+            [_sys.executable, "-c", skrypt, str(tmp_path)],
+            cwd=tmp_path, capture_output=True, text=True, timeout=120,
+        )
+        assert r.returncode != 0
+        assert "No module named 'sim_kalkulator'" in r.stderr
+
+    def test_wszystkie_pliki_czasu_dzialania_sa_w_paczce(self, paczka):
+        assert (paczka / "sim_kalkulator" / "silnik.py").exists()
+        assert (paczka / "web" / "index.html").exists()
+        assert (paczka / "przyklady" / "domykajacy_sie.yaml").exists()
+
+
+class TestDiagnostyka:
+    def test_diag_potwierdza_kompletnosc_paczki(self):
+        srv, adres = uruchom(zaladuj("diag").handler)
+        try:
+            kod, tresc = wolaj(adres)
+        finally:
+            srv.shutdown()
+            srv.server_close()
+        dane = json.loads(tresc)
+        assert kod == 200 and dane["ok"] is True
+        assert dane["pakiet_silnika"]["istnieje"]
+        assert dane["interfejs"]["istnieje"]
+        assert dane["parametry"]["istnieje"]
+        assert dane["silnik"]["przeliczenie"] == "ok"
+
+    def test_diag_nie_ujawnia_zmiennych_srodowiskowych(self):
+        srv, adres = uruchom(zaladuj("diag").handler)
+        try:
+            _, tresc = wolaj(adres)
+        finally:
+            srv.shutdown()
+            srv.server_close()
+        assert "environ" not in tresc and "SECRET" not in tresc.upper()
 
 
 class TestFunkcjeOdpowiadaja:

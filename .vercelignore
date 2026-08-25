@@ -1,0 +1,9 @@
+# Do wdrozenia jedzie silnik, parametry i interfejs. Reszta zostaje w repozytorium.
+tests/
+scripts/
+wyniki/
+__pycache__/
+*.pyc
+.pytest_cache/
+pytest.ini
+SPEC_kalkulator_SIM.md

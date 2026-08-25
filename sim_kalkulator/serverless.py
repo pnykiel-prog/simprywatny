@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any, Dict
@@ -124,3 +125,97 @@ def zbuduj_uchwyt_strony():
             pass
 
     return UchwytStrony
+
+
+def zbuduj_uchwyt_diagnostyczny():
+    """Buduje klase `handler` raportujaca stan paczki funkcji.
+
+    Builder Pythona nie dowozi automatycznie plikow spoza katalogu `api/`.
+    Ta funkcja pokazuje wprost, czy pakiet silnika, interfejs i parametry
+    faktycznie sa na miejscu — zamiast zostawiac 500 bez wyjasnienia.
+    """
+    import json
+    import platform
+
+    class UchwytDiagnostyczny(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802
+            raport: Dict[str, Any] = {
+                "python": platform.python_version(),
+                "katalog_roboczy": os.getcwd(),
+                "korzen_wyliczony": str(KORZEN),
+                "sys_path": [p for p in sys.path if p][:12],
+            }
+
+            def sprawdz(nazwa: str, wzgledna: str) -> None:
+                cel = KORZEN / wzgledna
+                raport[nazwa] = {
+                    "sciezka": str(cel),
+                    "istnieje": cel.exists(),
+                }
+                if cel.is_dir() and cel.exists():
+                    raport[nazwa]["pliki"] = sorted(p.name for p in cel.iterdir())[:40]
+
+            sprawdz("pakiet_silnika", "sim_kalkulator")
+            sprawdz("interfejs", "web/index.html")
+            sprawdz("parametry", DOMYSLNE_WEJSCIE)
+            sprawdz("katalog_przykladow", "przyklady")
+
+            try:
+                korzen_pliki = sorted(p.name for p in KORZEN.iterdir())[:40]
+            except OSError as exc:
+                korzen_pliki = [f"blad odczytu: {exc}"]
+            raport["korzen_zawartosc"] = korzen_pliki
+
+            # Prawdziwy test: czy silnik da sie zaimportowac i policzyc wariant.
+            try:
+                from .silnik import przelicz
+                from .dane import zbuduj as _zbuduj
+
+                wynik = przelicz(_zbuduj(parametry_bazowe()))
+                raport["silnik"] = {
+                    "import": "ok",
+                    "przeliczenie": "ok",
+                    "domyka_sie": wynik.domyka_sie,
+                    "projekt": wynik.wejscie.projekt.nazwa,
+                }
+            except Exception as exc:  # noqa: BLE001 — diagnostyka ma zlapac wszystko
+                import traceback
+
+                raport["silnik"] = {
+                    "import": "blad",
+                    "wyjatek": f"{type(exc).__name__}: {exc}",
+                    "slad": traceback.format_exc().splitlines()[-6:],
+                }
+
+            for nazwa in ("openpyxl", "yaml"):
+                try:
+                    modul = __import__(nazwa)
+                    raport[f"zaleznosc_{nazwa}"] = getattr(modul, "__version__", "obecna")
+                except Exception as exc:  # noqa: BLE001
+                    raport[f"zaleznosc_{nazwa}"] = f"BRAK: {exc}"
+
+            wszystko_na_miejscu = (
+                raport["pakiet_silnika"]["istnieje"]
+                and raport["interfejs"]["istnieje"]
+                and raport["parametry"]["istnieje"]
+                and raport["silnik"].get("przeliczenie") == "ok"
+            )
+            raport["ok"] = wszystko_na_miejscu
+            raport["werdykt"] = (
+                "Paczka funkcji jest kompletna."
+                if wszystko_na_miejscu
+                else "Paczka funkcji jest niekompletna — sprawdz includeFiles w vercel.json."
+            )
+
+            tresc = json.dumps(raport, ensure_ascii=False, indent=2).encode("utf-8")
+            self.send_response(200 if wszystko_na_miejscu else 500)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(tresc)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(tresc)
+
+        def log_message(self, format: str, *args: Any) -> None:
+            pass
+
+    return UchwytDiagnostyczny
