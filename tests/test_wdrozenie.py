@@ -6,6 +6,7 @@ silnik co serwer lokalny, i ze konfiguracja pokrywa wszystkie trasy uzywane
 przez interfejs.
 """
 
+import ast
 import importlib.util
 import json
 import re
@@ -62,6 +63,24 @@ def wolaj(adres, cialo=None):
         return exc.code, exc.read().decode()
 
 
+def nazwy_najwyzszego_poziomu(sciezka: Path) -> set:
+    """Nazwy zwiazane w ciele modulu — tak samo, jak widzi je analiza skladni.
+
+    Platforma szuka `handler` wylacznie na tym poziomie. Przypisanie schowane
+    w bloku `try` albo w funkcji jest dla niej niewidoczne.
+    """
+    drzewo = ast.parse(sciezka.read_text(encoding="utf-8"))
+    nazwy = set()
+    for wezel in drzewo.body:
+        if isinstance(wezel, ast.Assign):
+            nazwy |= {c.id for c in wezel.targets if isinstance(c, ast.Name)}
+        elif isinstance(wezel, (ast.ClassDef, ast.FunctionDef)):
+            nazwy.add(wezel.name)
+        elif isinstance(wezel, (ast.Import, ast.ImportFrom)):
+            nazwy |= {a.asname or a.name for a in wezel.names}
+    return nazwy
+
+
 class TestStrukturaKatalogu:
     def test_kazdy_plik_w_api_jest_funkcja_z_handlerem(self):
         # Vercel buduje kazdy plik .py w api/ jako funkcje. Plik pomocniczy
@@ -70,6 +89,26 @@ class TestStrukturaKatalogu:
         assert pliki, "katalog api/ jest pusty"
         for nazwa in pliki:
             assert hasattr(zaladuj(nazwa), "handler"), f"api/{nazwa}.py bez `handler`"
+
+    def test_handler_jest_widoczny_dla_analizy_skladni(self):
+        # Build przerywa sie komunikatem "Could not find a top-level app,
+        # application, or handler", gdy `handler` nie jest zwiazany w ciele
+        # modulu. Sam fakt, ze import go tworzy, nie wystarcza.
+        for plik in sorted(API.glob("*.py")):
+            assert "handler" in nazwy_najwyzszego_poziomu(plik), (
+                f"{plik.name}: `handler` nie jest zwiazany na najwyzszym poziomie"
+            )
+
+    def test_import_silnika_jest_leniwy(self):
+        # Import przy ladowaniu modulu wywala funkcje, zanim straznik zdazy
+        # zadzialac. Ma sie dziac dopiero przy obsludze zadania.
+        for plik in sorted(API.glob("*.py")):
+            for wezel in ast.parse(plik.read_text(encoding="utf-8")).body:
+                if isinstance(wezel, (ast.Import, ast.ImportFrom)):
+                    modul = getattr(wezel, "module", "") or ""
+                    assert not modul.startswith("sim_kalkulator"), (
+                        f"{plik.name}: silnik importowany na najwyzszym poziomie"
+                    )
 
     def test_katalog_api_nie_ma_plikow_pomocniczych(self):
         pomocnicze = [p.name for p in API.glob("*.py") if p.stem.startswith("_")]

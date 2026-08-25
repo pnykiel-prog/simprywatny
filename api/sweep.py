@@ -1,7 +1,7 @@
 """Funkcja serverless: /api/sweep
 
-Cienki adapter. Korzen repozytorium trafia na sys.path jawnie, zeby import
-pakietu nie zalezal od tego, jak platforma ustawia katalog roboczy.
+Adapter na `sim_kalkulator.serverless`, ktory wola ten sam silnik co serwer
+lokalny — jedna sciezka obliczeniowa dla obu srodowisk.
 """
 
 import json
@@ -13,52 +13,75 @@ from pathlib import Path
 KORZEN = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(KORZEN))
 
-try:
-    from sim_kalkulator.serverless import zbuduj_uchwyt
+TRASA = "sweep"
+LIMIT_ZADANIA = 2_000_000
 
-    handler = zbuduj_uchwyt("sweep")
-except Exception as _wyjatek:  # noqa: BLE001 — straznik startu, lapie wszystko
-    # Nazwa z `except ... as` znika po wyjsciu z bloku, wiec komunikat i slad
-    # trzeba utrwalic tutaj — inaczej straznik sam wywala sie na NameError.
-    _POWOD = "%s: %s" % (type(_wyjatek).__name__, _wyjatek)
-    _SLAD = traceback.format_exc().splitlines()[-6:]
 
-    class handler(BaseHTTPRequestHandler):  # noqa: N801 — nazwa wymagana przez platforme
-        """Silnik nie zaladowal sie — odpowiadamy, czego brakuje, zamiast pustym 500."""
+class handler(BaseHTTPRequestHandler):  # noqa: N801 — nazwa wymagana przez platforme
+    """Musi byc definicja klasy na NAJWYZSZYM poziomie modulu.
 
-        def do_GET(self):  # noqa: N802
-            self._powiedz_co_sie_stalo()
+    Platforma szuka `handler` analiza skladni, przegladajac wylacznie ciało
+    modulu. Przypisanie schowane w bloku `try` jest dla niej niewidoczne
+    i konczy sie bledem "Could not find a top-level app, application,
+    or handler".
 
-        def do_POST(self):  # noqa: N802
-            self._powiedz_co_sie_stalo()
+    Silnik importowany jest leniwie, przy obsludze zadania. Dzieki temu
+    niekompletne srodowisko daje czytelna diagnoze zamiast pustego 500,
+    a wykrywanie `handler` pozostaje niezalezne od powodzenia importu.
+    """
 
-        def _powiedz_co_sie_stalo(self):
-            try:
-                zawartosc = sorted(p.name for p in KORZEN.iterdir())[:40]
-            except OSError as exc:
-                zawartosc = ["blad odczytu: %s" % exc]
-            tresc = json.dumps({
-                "ok": False,
-                "typ": "start",
-                "powod": _POWOD,
-                "slad": _SLAD,
-                "korzen": str(KORZEN),
-                "korzen_zawartosc": zawartosc,
-                "pakiet_silnika_obecny": (KORZEN / "sim_kalkulator").exists(),
-                "interfejs_obecny": (KORZEN / "web" / "index.html").exists(),
-                "przyklady_obecne": (KORZEN / "przyklady").exists(),
-                "podpowiedz": (
-                    "Funkcja wystartowala, ale nie zaladowala silnika. Najczestsza "
-                    "przyczyna to pliki spoza katalogu api/ nieobjete includeFiles "
-                    "w vercel.json."
-                ),
-            }, ensure_ascii=False, indent=2).encode("utf-8")
-            self.send_response(500)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", str(len(tresc)))
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            self.wfile.write(tresc)
+    def do_GET(self):  # noqa: N802
+        self._obsluz(b"")
 
-        def log_message(self, format, *args):
-            pass
+    def do_POST(self):  # noqa: N802
+        dlugosc = int(self.headers.get("Content-Length") or 0)
+        if dlugosc > LIMIT_ZADANIA:
+            return self._odmow("Zadanie zbyt duze.")
+        self._obsluz(self.rfile.read(dlugosc) if dlugosc > 0 else b"")
+
+    def _obsluz(self, cialo):
+        try:
+            from sim_kalkulator import serverless
+        except Exception:  # noqa: BLE001 — straznik startu, lapie wszystko
+            return self._awaria(traceback.format_exc())
+        try:
+            serverless.obsluz(self, TRASA, cialo)
+        except Exception:  # noqa: BLE001 — zadne zadanie nie moze zostac bez odpowiedzi
+            return self._awaria(traceback.format_exc())
+
+    def _odmow(self, powod):
+        self._json(400, {"ok": False, "typ": "zadanie", "powod": powod})
+
+    def _awaria(self, slad):
+        try:
+            zawartosc = sorted(p.name for p in KORZEN.iterdir())[:40]
+        except OSError as exc:
+            zawartosc = ["blad odczytu: %s" % exc]
+        self._json(500, {
+            "ok": False,
+            "typ": "start",
+            "powod": slad.strip().splitlines()[-1],
+            "slad": slad.splitlines()[-6:],
+            "korzen": str(KORZEN),
+            "korzen_zawartosc": zawartosc,
+            "pakiet_silnika_obecny": (KORZEN / "sim_kalkulator").exists(),
+            "interfejs_obecny": (KORZEN / "web" / "index.html").exists(),
+            "przyklady_obecne": (KORZEN / "przyklady").exists(),
+            "podpowiedz": (
+                "Funkcja wystartowala, ale nie zaladowala silnika. Najczestsza "
+                "przyczyna to pliki spoza katalogu api/ nieobjete includeFiles "
+                "w vercel.json."
+            ),
+        })
+
+    def _json(self, kod, dane):
+        tresc = json.dumps(dane, ensure_ascii=False, indent=2).encode("utf-8")
+        self.send_response(kod)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(tresc)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(tresc)
+
+    def log_message(self, format, *args):
+        pass

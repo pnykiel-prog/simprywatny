@@ -46,87 +46,6 @@ def parametry_bazowe() -> Dict[str, Any]:
     return _bazowe_cache
 
 
-def zbuduj_uchwyt(akcja: str):
-    """Buduje klase `handler` obslugujaca jedna akcje API."""
-
-    class Uchwyt(BaseHTTPRequestHandler):
-        def _wyslij(self, kod: int, tresc: bytes, typ: str) -> None:
-            self.send_response(kod)
-            self.send_header("Content-Type", typ)
-            self.send_header("Content-Length", str(len(tresc)))
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            self.wfile.write(tresc)
-
-        def _json(self, kod: int, dane: Dict[str, Any]) -> None:
-            self._wyslij(
-                kod,
-                json.dumps(dane, ensure_ascii=False, default=_api.serializowalne).encode("utf-8"),
-                "application/json; charset=utf-8",
-            )
-
-        def _wykonaj(self, zmiany: Dict[str, Any]) -> None:
-            try:
-                kod, dane = _api.obsluz(akcja, parametry_bazowe(), zmiany)
-            except BladWalidacji as exc:
-                return self._json(400, {"ok": False, "typ": "walidacja", "powod": str(exc)})
-            except Exception as exc:  # noqa: BLE001 — zadne zadanie nie moze zostac bez odpowiedzi
-                import traceback
-
-                traceback.print_exc()
-                return self._json(
-                    500, {"ok": False, "typ": "serwer", "powod": f"{type(exc).__name__}: {exc}"}
-                )
-            self._json(kod, dane)
-
-        def do_GET(self) -> None:  # noqa: N802
-            self._wykonaj({})
-
-        def do_POST(self) -> None:  # noqa: N802
-            try:
-                dlugosc = int(self.headers.get("Content-Length") or 0)
-                if dlugosc > 2_000_000:
-                    raise BladWalidacji("Zadanie zbyt duze.")
-                cialo = json.loads(self.rfile.read(dlugosc).decode("utf-8")) if dlugosc else {}
-            except (ValueError, BladWalidacji) as exc:
-                return self._json(400, {"ok": False, "typ": "zadanie", "powod": str(exc)})
-            self._wykonaj(cialo.get("zmiany") or {})
-
-        def log_message(self, format: str, *args: Any) -> None:
-            pass
-
-    return Uchwyt
-
-
-def zbuduj_uchwyt_strony():
-    """Buduje klase `handler` serwujaca jednoplikowy interfejs."""
-    strona = KORZEN / "web" / "index.html"
-
-    class UchwytStrony(BaseHTTPRequestHandler):
-        def do_GET(self) -> None:  # noqa: N802
-            try:
-                tresc = strona.read_bytes()
-            except OSError as exc:
-                komunikat = f"Nie mozna wczytac interfejsu: {exc}".encode("utf-8")
-                self.send_response(500)
-                self.send_header("Content-Type", "text/plain; charset=utf-8")
-                self.send_header("Content-Length", str(len(komunikat)))
-                self.end_headers()
-                self.wfile.write(komunikat)
-                return
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(tresc)))
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            self.wfile.write(tresc)
-
-        def log_message(self, format: str, *args: Any) -> None:
-            pass
-
-    return UchwytStrony
-
-
 def raport_diagnostyczny() -> Dict[str, Any]:
     """Stan srodowiska uruchomieniowego: czy wszystko, czego potrzebuje silnik,
     jest na miejscu i czy da sie policzyc wariant.
@@ -206,22 +125,70 @@ def raport_diagnostyczny() -> Dict[str, Any]:
     return raport
 
 
-def zbuduj_uchwyt_diagnostyczny():
-    """Buduje klase `handler` podajaca raport diagnostyczny."""
-    import json
+def _wyslij(uchwyt, kod: int, tresc: bytes, typ: str) -> None:
+    uchwyt.send_response(kod)
+    uchwyt.send_header("Content-Type", typ)
+    uchwyt.send_header("Content-Length", str(len(tresc)))
+    uchwyt.send_header("Cache-Control", "no-store")
+    uchwyt.end_headers()
+    uchwyt.wfile.write(tresc)
 
-    class UchwytDiagnostyczny(BaseHTTPRequestHandler):
-        def do_GET(self) -> None:  # noqa: N802
-            raport = raport_diagnostyczny()
-            tresc = json.dumps(raport, ensure_ascii=False, indent=2).encode("utf-8")
-            self.send_response(200 if raport["ok"] else 500)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", str(len(tresc)))
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            self.wfile.write(tresc)
 
-        def log_message(self, format: str, *args: Any) -> None:
-            pass
+def _wyslij_json(uchwyt, kod: int, dane: Dict[str, Any]) -> None:
+    _wyslij(
+        uchwyt,
+        kod,
+        json.dumps(dane, ensure_ascii=False, default=_api.serializowalne).encode("utf-8"),
+        "application/json; charset=utf-8",
+    )
 
-    return UchwytDiagnostyczny
+
+def obsluz(uchwyt, trasa: str, cialo: bytes) -> None:
+    """Jedyne wejscie funkcji serverless. Trasa decyduje, co sie dzieje.
+
+    Uchwyt jest instancja BaseHTTPRequestHandler zdefiniowana w pliku funkcji.
+    Ta warstwa tylko pisze odpowiedz — liczy `sim_kalkulator.api`, czyli ten sam
+    silnik, ktory obsluguje serwer lokalny.
+    """
+    if trasa == "index":
+        return _obsluz_strone(uchwyt)
+    if trasa == "diag":
+        raport = raport_diagnostyczny()
+        return _wyslij_json(uchwyt, 200 if raport["ok"] else 500, raport)
+
+    try:
+        zadanie = json.loads(cialo.decode("utf-8")) if cialo else {}
+        zmiany = zadanie.get("zmiany") or {}
+    except ValueError as exc:
+        return _wyslij_json(
+            uchwyt, 400, {"ok": False, "typ": "zadanie", "powod": str(exc)}
+        )
+
+    try:
+        kod, dane = _api.obsluz(trasa, parametry_bazowe(), zmiany)
+    except BladWalidacji as exc:
+        return _wyslij_json(uchwyt, 400, {"ok": False, "typ": "walidacja", "powod": str(exc)})
+    _wyslij_json(uchwyt, kod, dane)
+
+
+def _obsluz_strone(uchwyt) -> None:
+    """Podaje jednoplikowy interfejs z `web/index.html`."""
+    strona = KORZEN / "web" / "index.html"
+    try:
+        tresc = strona.read_bytes()
+    except OSError as exc:
+        return _wyslij_json(
+            uchwyt,
+            500,
+            {
+                "ok": False,
+                "typ": "start",
+                "powod": f"Nie mozna wczytac interfejsu: {exc}",
+                "sciezka": str(strona),
+                "podpowiedz": (
+                    "Plik web/index.html nie trafil do paczki funkcji — sprawdz "
+                    "includeFiles w vercel.json."
+                ),
+            },
+        )
+    _wyslij(uchwyt, 200, tresc, "text/html; charset=utf-8")

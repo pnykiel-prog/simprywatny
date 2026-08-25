@@ -95,15 +95,23 @@ Jeśli build nadal nie widzi funkcji, sprawdź w ustawieniach projektu na Vercel
 **Root Directory** — musi wskazywać korzeń repozytorium, nie podkatalog.
 Konfiguracja w repozytorium tego nie nadpisze.
 
-### Strażnik startu funkcji
+### Kształt funkcji w `api/` — dwie reguły
 
-Import silnika dzieje się przy ładowaniu modułu, czyli **zanim** jakikolwiek
-kod obsługi błędów zdąży zadziałać. Gdyby pakietu zabrakło w paczce, platforma
-zwróciłaby nieczytelne 500 bez wskazówki.
+**1. `handler` musi być definicją klasy na najwyższym poziomie modułu.**
+Platforma szuka go analizą składni, przeglądając wyłącznie ciało modułu.
+Przypisanie schowane w bloku `try` jest dla niej niewidoczne i build kończy się
+błędem `Could not find a top-level "app", "application", or "handler"`.
 
-Każda funkcja w `api/` ma dlatego strażnik: przy nieudanym imporcie zwraca JSON
-z powodem, śladem, zawartością korzenia i informacją, których katalogów brakuje.
-Awaria środowiska jest wtedy diagnozowalna z przeglądarki, a nie tylko z logów.
+**2. Silnik importowany jest leniwie, przy obsłudze żądania.** Import przy
+ładowaniu modułu wywróciłby funkcję, zanim jakikolwiek kod obsługi błędów
+zdążyłby zadziałać — a wtedy platforma zwraca nieczytelne 500 bez wskazówki.
+Przy nieudanym imporcie strażnik zwraca JSON z powodem, śladem, zawartością
+korzenia i informacją, których katalogów brakuje.
+
+Obie reguły działają przeciw sobie tylko pozornie: klasa `handler` powstaje
+zawsze, a import zawodzi dopiero w środku żądania, gdzie da się go obsłużyć.
+Pilnują tego testy `test_handler_jest_widoczny_dla_analizy_skladni`
+i `test_import_silnika_jest_leniwy`.
 
 ### Gdy wdrożenie nie działa — `/api/diag`
 
