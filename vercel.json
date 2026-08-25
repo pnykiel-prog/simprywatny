@@ -3,5 +3,10 @@
   "rewrites": [
     { "source": "/", "destination": "/api/index" },
     { "source": "/index.html", "destination": "/api/index" }
-  ]
+  ],
+  "functions": {
+    "api/*.py": {
+      "includeFiles": "{sim_kalkulator/**,przyklady/**,web/**}"
+    }
+  }
 }

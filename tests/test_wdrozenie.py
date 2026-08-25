@@ -100,10 +100,20 @@ class TestKonfiguracja:
         # bledem "pattern doesn't match any Serverless Functions".
         assert "outputDirectory" not in konfiguracja()
 
-    def test_konfiguracja_nie_zawezaja_wzorca_funkcji(self):
-        # Wykrywanie zero-config samo znajduje api/*.py. Wlasny blok `functions`
-        # dokladal ryzyka bez zysku — zostaje domyslne wykrywanie.
-        assert "functions" not in konfiguracja()
+    def test_include_files_pokrywa_katalogi_czasu_dzialania(self):
+        # Blok `functions` sluzy wylacznie temu, zeby pliki spoza api/ trafily
+        # do paczki funkcji. Sam w sobie buildu nie psuje — psulo go
+        # outputDirectory, ktore przestawialo katalog poszukiwan.
+        wzorzec = konfiguracja()["functions"]["api/*.py"]["includeFiles"]
+        objete = {w.strip().split("/")[0] for w in wzorzec.strip("{}").split(",")}
+        assert objete >= set(KATALOGI_CZASU_DZIALANIA)
+
+    def test_wzorzec_funkcji_pasuje_do_istniejacych_plikow(self):
+        # Wzorzec, ktory nic nie lapie, przerywa build komunikatem
+        # "doesn't match any Serverless Functions inside the api directory".
+        wzorzec = next(iter(konfiguracja()["functions"]))
+        assert wzorzec == "api/*.py"
+        assert list(API.glob("*.py")), "wzorzec api/*.py nie lapie zadnego pliku"
 
     def test_vercelignore_nie_wyklucza_niczego_potrzebnego(self):
         wykluczone = {
@@ -163,26 +173,45 @@ class TestPaczkaFunkcji:
         assert r.returncode == 0, r.stderr[-800:]
         assert r.stdout.strip() == "handler"
 
-    def test_paczka_bez_pakietu_silnika_wysypuje_sie_czytelnie(self, tmp_path):
-        # Gdyby platforma nie dowiozla pakietu do paczki funkcji, blad jest
-        # jednoznaczny — i taki wlasnie raportuje /api/diag.
+    def test_paczka_bez_pakietu_silnika_odpowiada_diagnoza_nie_pustym_500(self, tmp_path):
+        # Import silnika dzieje sie przy ladowaniu modulu, czyli zanim
+        # jakikolwiek kod obslugi bledow zdazy zadzialac. Straznik startu
+        # zamienia nieczytelne 500 platformy na odpowiedz mowiaca, czego brakuje.
         import shutil
         import subprocess
         import sys as _sys
 
         shutil.copytree(KORZEN / "api", tmp_path / "api")
         skrypt = (
-            "import importlib.util,sys;from pathlib import Path;"
-            "spec=importlib.util.spec_from_file_location('fn',"
-            "Path(sys.argv[1])/'api'/'przelicz.py');"
-            "m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)"
+            "import importlib.util,sys,threading,urllib.request,urllib.error;"
+            "from http.server import ThreadingHTTPServer;from pathlib import Path;"
+            "K=Path(sys.argv[1]);"
+            "spec=importlib.util.spec_from_file_location('fn',K/'api'/'diag.py');"
+            "m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m);"
+            "srv=ThreadingHTTPServer(('127.0.0.1',0),m.handler);"
+            "threading.Thread(target=srv.serve_forever,daemon=True).start();"
+            "url='http://127.0.0.1:%d/'%srv.server_address[1];"
+            "\ntry:\n    urllib.request.urlopen(url,timeout=30)"
+            "\nexcept urllib.error.HTTPError as e:\n    print(e.code);print(e.read().decode())"
         )
         r = subprocess.run(
             [_sys.executable, "-c", skrypt, str(tmp_path)],
             cwd=tmp_path, capture_output=True, text=True, timeout=120,
         )
-        assert r.returncode != 0
-        assert "No module named 'sim_kalkulator'" in r.stderr
+        assert r.returncode == 0, r.stderr[-800:]
+        kod, _, cialo = r.stdout.partition("\n")
+        assert kod.strip() == "500"
+        raport = json.loads(cialo)
+        assert raport["ok"] is False
+        assert raport["typ"] == "start"
+        assert "No module named 'sim_kalkulator'" in raport["powod"]
+        assert raport["pakiet_silnika_obecny"] is False
+        assert "includeFiles" in raport["podpowiedz"]
+
+    def test_straznik_startu_jest_w_kazdej_funkcji(self):
+        for plik in API.glob("*.py"):
+            tresc = plik.read_text(encoding="utf-8")
+            assert "typ\": \"start" in tresc or '"typ": "start"' in tresc, plik.name
 
     def test_wszystkie_pliki_czasu_dzialania_sa_w_paczce(self, paczka):
         assert (paczka / "sim_kalkulator" / "silnik.py").exists()

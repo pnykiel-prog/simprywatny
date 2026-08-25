@@ -69,24 +69,31 @@ api/arkusz.py      →  /api/arkusz
 api/diag.py        →  /api/diag      funkcja serwisowa — stan paczki funkcji
 ```
 
-### Czego w `vercel.json` być nie może
+### Konfiguracja `vercel.json` — dwie rzeczy naraz
 
-Konfiguracja jest celowo minimalna — same `rewrites`. Dwa ustawienia, które
-wyglądają rozsądnie, a wywalają build:
+Funkcje potrzebują trzech katalogów spoza `api/`: `sim_kalkulator/`,
+`web/index.html` i `przyklady/`. Dokłada je `includeFiles` w bloku `functions`.
 
-- **`outputDirectory`** przesuwa katalog, w którym platforma szuka funkcji.
-  Katalog `api/` w korzeniu przestaje być widoczny i build kończy się błędem
-  `The pattern "api/*.py" defined in functions doesn't match any Serverless
-  Functions inside the api directory`.
-- **Własny blok `functions`** dokłada ryzyka bez zysku: wykrywanie zero-config
-  samo znajduje `api/*.py`.
+**`outputDirectory` musi pozostać nieustawione.** Przesuwa katalog, w którym
+platforma szuka funkcji, przez co `api/` w korzeniu przestaje być widoczne,
+a build kończy się błędem:
 
-Pilnują tego testy `test_konfiguracja_nie_przestawia_katalogu_wyjsciowego`
-i `test_konfiguracja_nie_zawezaja_wzorca_funkcji`.
+```
+The pattern "api/*.py" defined in `functions` doesn't match any
+Serverless Functions inside the `api` directory
+```
 
-Funkcje potrzebują trzech rzeczy spoza `api/`: pakietu `sim_kalkulator/`,
-pliku `web/index.html` i katalogu `przyklady/`. Gdyby któraś nie trafiła do
-paczki funkcji, `/api/diag` powie to wprost.
+Pilnuje tego test `test_konfiguracja_nie_przestawia_katalogu_wyjsciowego`.
+
+### Strażnik startu funkcji
+
+Import silnika dzieje się przy ładowaniu modułu, czyli **zanim** jakikolwiek
+kod obsługi błędów zdąży zadziałać. Gdyby pakietu zabrakło w paczce, platforma
+zwróciłaby nieczytelne 500 bez wskazówki.
+
+Każda funkcja w `api/` ma dlatego strażnik: przy nieudanym imporcie zwraca JSON
+z powodem, śladem, zawartością korzenia i informacją, których katalogów brakuje.
+Awaria środowiska jest wtedy diagnozowalna z przeglądarki, a nie tylko z logów.
 
 ### Gdy wdrożenie nie działa — `/api/diag`
 

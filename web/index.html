@@ -248,8 +248,21 @@ const licz = (x, m) => x == null ? "—" :
 
 function pokazBlad(tekst) {
   const el = $("#blad");
-  el.textContent = tekst;
+  el.textContent = "";
   el.hidden = !tekst;
+  if (!tekst) return;
+  el.appendChild(document.createTextNode(tekst));
+  // Skrót do diagnostyki — jeden klik zamiast tłumaczenia, gdzie jej szukać.
+  const stopka = document.createElement("div");
+  stopka.style.marginTop = "10px";
+  stopka.style.fontSize = "12px";
+  const a = document.createElement("a");
+  a.href = "/api/diag";
+  a.target = "_blank";
+  a.rel = "noopener";
+  a.textContent = "Otwórz diagnostykę środowiska (/api/diag)";
+  stopka.appendChild(a);
+  el.appendChild(stopka);
 }
 
 async function api(sciezka, ciało) {
@@ -257,12 +270,36 @@ async function api(sciezka, ciało) {
     ? {method: "POST", headers: {"Content-Type": "application/json"},
        body: JSON.stringify(ciało)}
     : {method: "GET"};
-  const odp = await fetch(sciezka, opcje);
-  const dane = await odp.json();
+
+  let odp;
+  try {
+    odp = await fetch(sciezka, opcje);
+  } catch (e) {
+    // Sieć nie doszła do serwera — bez statusu nie ma czego interpretować.
+    throw new Error(`Nie udało się połączyć z ${sciezka}: ${e.message}`);
+  }
+
+  // Treść czytamy jako tekst, zanim spróbujemy JSON-a. Gdy odpowiedź nie jest
+  // JSON-em (strona błędu platformy, przekierowanie logowania), sam komunikat
+  // parsera nic nie mówi — a status i początek treści mówią wszystko.
+  const tekst = await odp.text();
+  let dane = null;
+  try {
+    dane = JSON.parse(tekst);
+  } catch (e) {
+    throw new Error(
+      `${sciezka} zwróciło HTTP ${odp.status} ${odp.statusText}, ale nie JSON.\n` +
+      `Początek odpowiedzi:\n${tekst.slice(0, 400)}`
+    );
+  }
+
   if (!dane.ok) {
     const etykieta = dane.typ === "walidacja" ? "Walidacja zatrzymała obliczenie"
-                   : dane.typ === "obliczenie" ? "Silnik przerwał obliczenie" : "Błąd";
-    throw new Error(etykieta + ":\n" + dane.powod);
+                   : dane.typ === "obliczenie" ? "Silnik przerwał obliczenie"
+                   : dane.typ === "start" ? "Silnik nie wystartował"
+                   : `Błąd (HTTP ${odp.status})`;
+    const szczegol = dane.podpowiedz ? `\n\n${dane.podpowiedz}` : "";
+    throw new Error(`${etykieta}:\n${dane.powod || tekst.slice(0, 400)}${szczegol}`);
   }
   return dane;
 }
