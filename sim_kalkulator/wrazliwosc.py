@@ -35,6 +35,8 @@ class PunktSweepu:
     werdykty: Tuple[bool, bool, bool]          # test 1, 2, 3
     wiazace_ograniczenie: str
     luki: Tuple[Tuple[str, Decimal, str], ...]  # (opis, kwota, jednostka)
+    # Wymagany wklad wlasny w tym punkcie — os pionowa wykresu negocjacyjnego.
+    wklad_wymagany: Optional[Decimal] = None
     powod_niepoliczalnosci: str = ""
 
     @property
@@ -123,6 +125,7 @@ def _punkt(w: Wejscie, udzial: Decimal) -> PunktSweepu:
             for t in werdykty.wszystkie
             if not t.przechodzi
         ),
+        wklad_wymagany=wynik.finansowanie.wklad_wlasny_wymagany,
     )
 
 

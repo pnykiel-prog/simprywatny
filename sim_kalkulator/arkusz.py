@@ -920,9 +920,15 @@ def _pula(wb: Workbook, wynik: Wynik, rej: Rejestr, spoleczna: bool) -> None:
         # Kwota kredytu to najmniejszy pulap ze wszystkich lat, sciety limitem
         # ustawowym i zaokraglony w dol do pelnych zlotych — tak samo jak w silniku.
         komorka = ws[komorka_kredytu.replace("$", "")]
+        # Trzy ograniczenia: ile uniesie czynsz, ile pozwala ustawa i ile
+        # kredytu w ogole potrzeba po dotacji i partycypacji.
+        potrzebny = (
+            f"({rej[f'{p}.koszty']}-{rej[f'grant.{p}']}"
+            f"-{rej[f'{p}.koszty']}*{rej['partycypacja_stawka']})"
+        )
         komorka.value = (
-            f"=ROUNDDOWN(MIN(MIN({rej[f'{p}.pulapy']}),"
-            f"{rej[f'{p}.koszty']}*{rej['prawo.kredyt_max_udzial']}),0)"
+            f"=ROUNDDOWN(MAX(0,MIN(MIN({rej[f'{p}.pulapy']}),"
+            f"{rej[f'{p}.koszty']}*{rej['prawo.kredyt_max_udzial']},{potrzebny})),0)"
         )
         komorka.number_format = KWOTA
         komorka.font = Font(bold=True)

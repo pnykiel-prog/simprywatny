@@ -351,8 +351,8 @@ def build(
                 podstawa="§ 7 ust. 7 rozp. Dz.U. 2025 poz. 1897",
             
                 tresc_potoczna=(
-                    "Do limitu pomocy publicznej wlicza sie takze wsparcie z Rzadowego Funduszu "
-                    "i wartosc dokumentacji projektowej z zasobu Banku. Nie sa darmowe w sensie limitu."
+                    "Do limitu pomocy publicznej wlicza się także wsparcie z Rządowego Funduszu "
+                    "i wartość dokumentacji projektowej z zasobu Banku. Nie są darmowe w sensie limitu."
                 ),
                 waga=Waga.ZMIENIA_KWOTE,
             )
@@ -396,8 +396,8 @@ def build(
                 podstawa="art. 13 ust. 1a ustawy z 8.12.2006 — kwestia otwarta 10.1",
             
                 tresc_potoczna=(
-                    "Limit pomocy publicznej liczony jest raz, lacznie dla obu pul. Przy odczycie "
-                    "domyslnym byly to dwa osobne rachunki o roznych progach."
+                    "Limit pomocy publicznej liczony jest raz, łącznie dla obu pul. Przy odczycie "
+                    "domyślnym były to dwa osobne rachunki o różnych progach."
                 ),
                 waga=Waga.ZMIENIA_WERDYKT,
             )
@@ -417,8 +417,8 @@ def build(
                     podstawa="art. 5 ust. 5 i 11 ustawy z 8.12.2006",
                 
                 tresc_potoczna=(
-                    "Wedlug modelu inwestycja zarabia wiecej, niz kosztuje utrzymanie uslugi. Kazda "
-                    "zlotowka dotacji jest wtedy nadwyzka — sprawdz czynsz i sposob rozliczenia nakladu."
+                    "Według modelu inwestycja zarabia więcej, niż kosztuje utrzymanie usługi. Każda "
+                    "złotówka dotacji jest wtedy nadwyżką — sprawdź czynsz i sposób rozliczenia nakładu."
                 ),
                 waga=Waga.ZMIENIA_WERDYKT,
             )

@@ -29,7 +29,7 @@ class TestWerdyktZbiorczy:
         assert len(r.werdykty.wszystkie) == 3
         assert [t.numer for t in r.werdykty.wszystkie] == [1, 2, 3]
         assert [t.nazwa for t in r.werdykty.wszystkie] == [
-            "Kapital", "Zdolnosc czynszowa", "Rekompensata"
+            "Kapitał", "Zdolność czynszowa", "Rekompensata"
         ]
 
     def test_kazdy_werdykt_negatywny_podaje_wiazace_ograniczenie(self):
@@ -80,9 +80,9 @@ class TestMontazu:
         r = przelicz(zbuduj(dane, na_dzien=wspolne.DATA_ODNIESIENIA))
         t = r.werdykty.montaz
         assert t.przechodzi is True
-        assert t.luka_opis == "Wymagany wklad wlasny"
+        assert t.luka_opis == "Wymagany wkład własny"
         assert t.luka_kwota == r.finansowanie.wklad_wlasny_wymagany
-        assert "trzeba wylozyc wlasnych" in t.wiazace_ograniczenie
+        assert "trzeba wyłożyć własnych" in t.wiazace_ograniczenie
 
     def test_brak_deklaracji_nie_jest_bledem_walidacji(self):
         dane = wspolne.zmien()
@@ -108,10 +108,24 @@ class TestMontazu:
 class TestKredytAutomatyczny:
     """Rozdz. 2.2 — kredyt liczony, nie wpisywany. Pokrycie 1,0 z konstrukcji."""
 
-    def test_wskaznik_pokrycia_wychodzi_jeden(self):
-        r = wynik()
-        assert r.projekcja.spoleczna.minimalny_dscr >= D("1")
+    def test_wskaznik_pokrycia_nigdy_nie_schodzi_ponizej_jednosci(self):
+        # Test 2 spelniony z konstrukcji. Pokrycie wychodzi dokladnie 1,0, gdy
+        # wiazacy jest czynsz, i wyzej, gdy kredytu potrzeba mniej, niz czynsz
+        # uniesie — nikt nie zaciaga wiecej, niz brakuje po dotacji.
+        for czynsz in (14.0, 18.0, 22.0, 26.0):
+            r = wynik(pula_spoleczna__czynsz_zakladany_m2_mies=czynsz)
+            assert r.projekcja.spoleczna.minimalny_dscr >= D("1"), czynsz
+
+    def test_pokrycie_wychodzi_dokladnie_jeden_gdy_wiaze_czynsz(self):
+        r = wynik(pula_spoleczna__czynsz_zakladany_m2_mies=14.0)
         assert r.projekcja.spoleczna.minimalny_dscr < D("1.001")
+
+    def test_kredyt_nie_przekracza_tego_co_potrzebne(self):
+        # Bez tego ograniczenia wymagany wklad wlasny wychodzilby ujemny.
+        r = wynik(pula_spoleczna__czynsz_zakladany_m2_mies=30.0)
+        assert r.finansowanie.wklad_wlasny_wymagany >= D("0")
+        f = r.finansowanie.spoleczna
+        assert f.grant + f.kredyt + f.partycypacja <= r.alokacja.spoleczna.koszty_przedsiewziecia
 
     def test_test_czynszowy_przechodzi_z_konstrukcji(self):
         assert wynik().werdykty.zdolnosc_czynszowa.przechodzi is True
@@ -168,7 +182,7 @@ class TestMontazuSzczegoly:
         t = r.werdykty.montaz
         assert t.przechodzi is False
         assert t.luka_jednostka == "zl"
-        assert t.luka_opis == "Brakujacy kapital"
+        assert t.luka_opis == "Brakujący kapitał"
         assert t.luka_kwota == r.finansowanie.wklad_wlasny_wymagany - D("100000.0")
         assert "Brakuje" in t.wiazace_ograniczenie
 
@@ -236,13 +250,21 @@ class TestRekompensaty:
 
 
 class TestPrzeliczBezpiecznie:
-    def test_kredyt_przy_pelnej_puli_komunalnej_wraca_jako_niepoliczalny(self):
-        # art. 5a ust. 3 — przesuniecie pokretla na 100% czyni konfiguracje
-        # z kredytem bezprawna. Sweep ma to pokazac jako powod, nie jako porazke.
+    def test_pelna_pula_komunalna_liczy_sie_bez_kredytu(self):
+        # Tryb automatyczny: kwote kredytu wyznacza czynsz, a bez mieszkan
+        # spolecznych wychodzi zero. Nie ma czego zabraniac.
         r = przelicz_udzial(wspolne.wejscie(), D("1.0"))
+        assert not isinstance(r, WynikNieobliczalny)
+        assert r.finansowanie.spoleczna.kredyt == D("0")
+
+    def test_kredyt_reczny_przy_pelnej_puli_komunalnej_wraca_jako_niepoliczalny(self):
+        dane = wspolne.zmien()
+        dane["przelaczniki"]["tryb_kredytu"] = "reczny"
+        from sim_kalkulator.dane import zbuduj
+
+        r = przelicz_udzial(zbuduj(dane, na_dzien=wspolne.DATA_ODNIESIENIA), D("1.0"))
         assert isinstance(r, WynikNieobliczalny)
         assert r.typ == "walidacja"
-        assert r.domyka_sie is False
         assert "art. 5a ust. 3" in r.powod
 
     def test_czynsz_ponad_limit_po_przesunieciu_pokretla_wraca_jako_powod(self):
@@ -298,8 +320,8 @@ class TestRegresjaPrzykladow:
     def test_wzorcowy_zamrozone_liczby(self):
         r = przelicz(wczytaj_yaml(wspolne.WZORCOWY))
         assert r.alokacja.koszty_laczne == D("29050000.00")
-        assert r.finansowanie.spoleczna.kredyt == D("7606633")
-        assert r.finansowanie.wklad_wlasny_wymagany == D("1327117.00")
+        assert r.finansowanie.spoleczna.kredyt == D("7190750")
+        assert r.finansowanie.wklad_wlasny_wymagany == D("1743000.00")
         assert r.granty.spoleczna.udzial_wsparcia.quantize(D("0.0001")) == D("0.4464")
         assert r.granty.komunalna.udzial_wsparcia == D("0.80")
 
@@ -311,8 +333,8 @@ class TestRegresjaPrzykladow:
     def test_domykajacy_sie_zamrozone_liczby(self):
         r = przelicz(wczytaj_yaml(wspolne.KATALOG_PRZYKLADOW / "domykajacy_sie.yaml"))
         assert r.alokacja.koszty_laczne == D("29050000.00")
-        assert r.finansowanie.spoleczna.kredyt == D("7536579")
-        assert r.finansowanie.wklad_wlasny_wymagany == D("1397171.00")
+        assert r.finansowanie.spoleczna.kredyt == D("7190750")
+        assert r.finansowanie.wklad_wlasny_wymagany == D("1743000.00")
         assert r.projekcja.spoleczna.pierwszy_rok_naruszenia is None
 
     def test_oba_przyklady_maja_te_same_koszty_a_inny_werdykt(self):

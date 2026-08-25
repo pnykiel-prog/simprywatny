@@ -43,16 +43,16 @@ class TestZakresSweepu:
 
 class TestPunktGraniczny:
     def test_maksymalny_udzial_i_punkt_graniczny(self, sweep_domykajacy):
-        assert sweep_domykajacy.maksymalny_udzial_komunalny == D("0.80")
-        assert sweep_domykajacy.punkt_graniczny == D("0.85")
+        assert sweep_domykajacy.maksymalny_udzial_komunalny == D("0.75")
+        assert sweep_domykajacy.punkt_graniczny == D("0.80")
 
     def test_ponizej_granicy_wszystko_przechodzi(self, sweep_domykajacy):
         for punkt in sweep_domykajacy.punkty:
-            if punkt.udzial <= D("0.80"):
+            if punkt.udzial <= D("0.75"):
                 assert punkt.domyka_sie is True, punkt.udzial
 
     def test_powyzej_granicy_blokuje_test_montazu(self, sweep_domykajacy):
-        powyzej = [p for p in sweep_domykajacy.punkty if D("0.85") <= p.udzial <= D("0.95")]
+        powyzej = [p for p in sweep_domykajacy.punkty if D("0.80") <= p.udzial <= D("0.95")]
         assert powyzej
         for punkt in powyzej:
             assert punkt.domyka_sie is False
@@ -89,11 +89,19 @@ class TestBrakDomkniecia:
 
 
 class TestPunktyNiepoliczalne:
-    def test_kredyt_przy_pelnej_puli_komunalnej_jest_niepoliczalny(self, sweep_domykajacy):
-        ostatni = sweep_domykajacy.punkty[-1]
+    def test_kredyt_reczny_przy_pelnej_puli_komunalnej_jest_niepoliczalny(self):
+        dane = wspolne.zmien()
+        dane["przelaczniki"]["tryb_kredytu"] = "reczny"
+        from sim_kalkulator.dane import zbuduj
+
+        s = wrazliwosc.sweep_udzialu(zbuduj(dane, na_dzien=wspolne.DATA_ODNIESIENIA))
+        ostatni = s.punkty[-1]
         assert ostatni.udzial == D("1.00")
         assert ostatni.policzalny is False
         assert "art. 5a ust. 3" in ostatni.powod_niepoliczalnosci
+
+    def test_tryb_automatyczny_liczy_caly_zakres(self, sweep_domykajacy):
+        assert all(p.policzalny for p in sweep_domykajacy.punkty)
 
     def test_niepoliczalny_nie_liczy_sie_jako_domykajacy(self, sweep_domykajacy):
         assert all(p.policzalny for p in sweep_domykajacy.punkty_domykajace)
@@ -167,8 +175,8 @@ class TestWrazliwoscJednoparametrowa:
 class TestAnalizaZbiorcza:
     def test_podsumowanie_podaje_granice_w_procentach(self):
         a = wrazliwosc.build(wczytaj_yaml(DOMYKAJACY), krok=D("0.05"))
+        assert "75%" in a.podsumowanie
         assert "80%" in a.podsumowanie
-        assert "85%" in a.podsumowanie
 
     def test_podsumowanie_braku_domkniecia_wskazuje_test(self):
         a = wrazliwosc.build(wczytaj_yaml(wspolne.WZORCOWY), krok=D("0.25"))

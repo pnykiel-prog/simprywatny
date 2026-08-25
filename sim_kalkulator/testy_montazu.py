@@ -24,9 +24,17 @@ from .rekompensata import TestRekompensaty
 from .waluta import ZERO, bezpieczny_iloraz, na_m2
 
 
+NAZWY_PUL = {"spoleczna": "mieszkaniach społecznych", "komunalna": "mieszkaniach komunalnych"}
+
+
+def _pula(nazwa: str) -> str:
+    """Nazwa puli w formie, ktora czyta sie w zdaniu."""
+    return NAZWY_PUL.get(nazwa, nazwa)
+
+
 def _zl(kwota: Decimal) -> str:
     """Kwota w zapisie, ktory czyta sie bez wysilku."""
-    return f"{kwota:,.0f} zl".replace(",", " ")
+    return f"{kwota:,.0f} zł".replace(",", " ")
 
 JEDEN = Decimal(1)
 
@@ -75,13 +83,13 @@ def test_montazu(w: Wejscie, fin: Finansowanie) -> Werdykt:
     if dostepny is None:
         return Werdykt(
             numer=1,
-            nazwa="Kapital",
+            nazwa="Kapitał",
             przechodzi=True,
             wiazace_ograniczenie=(
-                f"Zeby zrealizowac te inwestycje, trzeba wylozyc wlasnych "
-                f"{_zl(wymagany)}, czyli {udzial:.0%} kosztow."
+                f"Żeby zrealizować tę inwestycję, trzeba wyłożyć własnych "
+                f"{_zl(wymagany)}, czyli {udzial:.0%} kosztów."
             ),
-            luka_opis="Wymagany wklad wlasny",
+            luka_opis="Wymagany wkład własny",
             luka_kwota=wymagany,
             luka_jednostka="zl",
             szczegoly=szczegoly,
@@ -92,7 +100,7 @@ def test_montazu(w: Wejscie, fin: Finansowanie) -> Werdykt:
     if luka > ZERO:
         ograniczenie = (
             f"Brakuje {_zl(luka)}. Inwestycja wymaga {_zl(wymagany)}, "
-            f"a zadeklarowany kapital to {_zl(dostepny)}."
+            f"a zadeklarowany kapitał to {_zl(dostepny)}."
         )
     else:
         ograniczenie = (
@@ -102,10 +110,10 @@ def test_montazu(w: Wejscie, fin: Finansowanie) -> Werdykt:
 
     return Werdykt(
         numer=1,
-        nazwa="Kapital",
+        nazwa="Kapitał",
         przechodzi=luka == ZERO,
         wiazace_ograniczenie=ograniczenie,
-        luka_opis="Brakujacy kapital" if luka > ZERO else "Wymagany wklad wlasny",
+        luka_opis="Brakujący kapitał" if luka > ZERO else "Wymagany wkład własny",
         luka_kwota=luka if luka > ZERO else wymagany,
         luka_jednostka="zl",
         szczegoly=szczegoly,
@@ -200,13 +208,14 @@ def test_zdolnosci_czynszowej(
             default=None,
         )
         ograniczenie = (
-            f"Najciasniej w puli {najslabsza.nazwa}: DSCR {najslabsza.minimalny_dscr:.3f}."
+            f"Czynsz pokrywa koszty i ratę kredytu w każdym roku. Najciaśniej jest "
+            f"w {_pula(najslabsza.nazwa)}."
             if najslabsza is not None
-            else "Brak obslugi dlugu — test przechodzi trywialnie."
+            else "Bez kredytu nie ma czego pokrywać — czynsz wystarcza na koszty bieżące."
         )
         return Werdykt(
             numer=2,
-            nazwa="Zdolnosc czynszowa",
+            nazwa="Zdolność czynszowa",
             przechodzi=True,
             wiazace_ograniczenie=ograniczenie,
             luka_opis="Luka czynszowa",
@@ -218,11 +227,11 @@ def test_zdolnosci_czynszowej(
     pula, rok, dscr = min(naruszenia, key=lambda n: n[1])
     return Werdykt(
         numer=2,
-        nazwa="Zdolnosc czynszowa",
+        nazwa="Zdolność czynszowa",
         przechodzi=False,
         wiazace_ograniczenie=(
-            f"Obsluga dlugu i koszty w puli {pula}. Pierwsze naruszenie w roku {rok}, "
-            f"najnizszy DSCR {dscr:.3f}."
+            f"Czynsz nie pokrywa obsługi kredytu w puli {pula}. Pierwsze naruszenie "
+            f"w roku {rok}."
         ),
         luka_opis=f"Luka czynszowa (pula {wiazaca_pula}, stawka bazowa)",
         luka_kwota=luka_stawki,
@@ -252,9 +261,8 @@ def test_rekompensaty(rek: TestRekompensaty) -> Werdykt:
     if rek.przechodzi:
         najciasniej = max(rek.badane, key=lambda p: p.nadwyzka_wzgledna, default=None)
         ograniczenie = (
-            f"Najciasniej w puli {najciasniej.nazwa}: nadwyzka "
-            f"{najciasniej.nadwyzka_wzgledna:.1%} przy progu "
-            f"{najciasniej.prog_tolerancji:.0%}."
+            f"Pomoc publiczna mieści się w dopuszczalnym limicie. Najciaśniej jest "
+            f"w {_pula(najciasniej.nazwa)}."
             if najciasniej is not None
             else "Brak pul do zbadania."
         )
@@ -279,9 +287,8 @@ def test_rekompensaty(rek: TestRekompensaty) -> Werdykt:
         nazwa="Rekompensata",
         przechodzi=False,
         wiazace_ograniczenie=(
-            f"Nadwyzka rekompensaty w puli {najgorsza.nazwa}: "
-            f"{najgorsza.nadwyzka_wzgledna:.1%} sredniej rocznej przy progu "
-            f"{najgorsza.prog_tolerancji:.0%} (sciezka {najgorsza.sciezka})."
+            f"Pomoc publiczna w {_pula(najgorsza.nazwa)} przekracza dopuszczalny limit. "
+            f"Nadwyżka to {najgorsza.nadwyzka_wzgledna:.0%} średniej rocznej."
         ),
         luka_opis="Nadwyzka rekompensaty",
         luka_kwota=rek.nadwyzka_laczna,

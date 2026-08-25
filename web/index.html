@@ -4,555 +4,887 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Kalkulator montażu finansowego — prywatny SIM</title>
-<!-- Ikona jako data-URI: zero zapytan na zewnatrz i zero 404 w konsoli. -->
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%231f4e79'/%3E%3Cpath d='M3 11h2.2v2H3zm3.4-3h2.2v5H6.4zm3.4-4H12v9H9.8z' fill='%23fff'/%3E%3C/svg%3E">
 <style>
+/* Palety wykresow pochodza z walidowanego zestawu; slot 3 i 4 nie dobijaja
+   w trybie jasnym do kontrastu 3:1, dlatego kazda seria ma etykiete wprost
+   i istnieje widok tabelaryczny — to jest wymagana ulga, nie ozdoba. */
 :root{
-  --tlo:#f7f7f5; --karta:#ffffff; --tekst:#1a1a18; --przygaszony:#6b6b66;
-  --linia:#dedcd6; --akcent:#1f4e79; --zle:#a51c1c; --dobrze:#1d6b32;
-  --uwaga:#8a5a00; --zolte:#fff6d9;
+  --tlo:#f4f4f2; --karta:#fcfcfb; --linia:#e0dfda; --linia-mocna:#c9c8c2;
+  --tekst:#0b0b0b; --tekst-2:#52514e; --tekst-3:#7a7975;
+  --akcent:#1f4e79;
+  --dobrze:#0ca30c; --uwaga:#fab219; --zle:#d03b3b;
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100; --s7:#4a3aa7;
+  --neutral:#9a9992;
+  --pasmo-ok:rgba(12,163,12,.10); --pasmo-zle:rgba(208,59,59,.10);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --tlo:#111110; --karta:#1a1a19; --linia:#33332f; --linia-mocna:#4a4a45;
+    --tekst:#fff; --tekst-2:#c3c2b7; --tekst-3:#8f8e86;
+    --akcent:#5598e7;
+    --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s7:#9085e9;
+    --neutral:#6b6a64;
+    --pasmo-ok:rgba(12,163,12,.18); --pasmo-zle:rgba(208,59,59,.18);
+  }
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--tlo);color:var(--tekst);
   font:15px/1.5 "Segoe UI",-apple-system,BlinkMacSystemFont,Roboto,Arial,sans-serif}
-header{background:var(--akcent);color:#fff;padding:14px 24px}
-header h1{margin:0;font-size:17px;font-weight:600}
-header p{margin:3px 0 0;font-size:12.5px;opacity:.85}
-main{max-width:1240px;margin:0 auto;padding:20px 24px 64px}
-.karta{background:var(--karta);border:1px solid var(--linia);border-radius:6px;
-  padding:16px 18px;margin-bottom:16px}
-.karta h2{margin:0 0 12px;font-size:14px;text-transform:uppercase;letter-spacing:.06em;
-  color:var(--przygaszony);font-weight:700}
-.siatka{display:grid;gap:16px}
-@media(min-width:900px){.siatka-3{grid-template-columns:repeat(3,1fr)}
-  .siatka-2{grid-template-columns:3fr 2fr}}
+h1{margin:0;font-size:15px;font-weight:600}
+header{background:var(--akcent);color:#fff;padding:9px 20px;display:flex;
+  justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+header span{font-size:12px;opacity:.9}
+main{max-width:1500px;margin:0 auto;padding:14px 20px 40px}
 
-/* --- pokretlo --- */
-.pokretlo{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:10px}
-.pokretlo .wartosc{font-size:40px;font-weight:700;color:var(--akcent);
-  font-variant-numeric:tabular-nums;min-width:110px}
-.pokretlo label{font-size:13px;color:var(--przygaszony)}
-input[type=range]{width:100%;height:26px;accent-color:var(--akcent)}
-.skala{display:flex;justify-content:space-between;font-size:11px;color:var(--przygaszony);
-  margin-top:-4px}
+/* ---------- pasek werdyktu ---------- */
+.werdykty{display:grid;gap:10px;grid-template-columns:repeat(3,1fr);margin-bottom:10px}
+.pole{background:var(--karta);border:1px solid var(--linia);border-left:5px solid var(--neutral);
+  border-radius:6px;padding:10px 14px}
+.pole.tak{border-left-color:var(--dobrze)} .pole.nie{border-left-color:var(--zle)}
+.pole .nazwa{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--tekst-3);
+  display:flex;align-items:center;gap:6px}
+.pole .liczba{font-size:25px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.15}
+.pole.tak .liczba{color:var(--dobrze)} .pole.nie .liczba{color:var(--zle)}
+.pole .opis{font-size:12px;color:var(--tekst-2)}
+.ikona{font-size:13px;font-weight:700}
+.zdanie{background:var(--karta);border:1px solid var(--linia);border-radius:6px;
+  padding:10px 14px;margin-bottom:14px;font-size:14px}
+.zdanie b{color:var(--akcent)}
 
-/* --- werdykty --- */
-.werdykt{border:1px solid var(--linia);border-left-width:5px;border-radius:5px;
-  padding:12px 14px;background:#fff}
-.werdykt.tak{border-left-color:var(--dobrze)}
-.werdykt.nie{border-left-color:var(--zle)}
-.werdykt.nieznany{border-left-color:var(--linia);opacity:.55}
-.werdykt h3{margin:0 0 2px;font-size:13px;color:var(--przygaszony);font-weight:600}
-.werdykt .status{font-size:19px;font-weight:700;margin-bottom:6px}
-.werdykt.tak .status{color:var(--dobrze)}
-.werdykt.nie .status{color:var(--zle)}
-.werdykt .ograniczenie{font-size:12.5px;color:var(--tekst);margin-bottom:6px}
-.werdykt .luka{font-size:14px;font-weight:700;color:var(--zle);
+/* ---------- uklad ---------- */
+.strefy{display:grid;gap:14px;grid-template-columns:1fr}
+@media(min-width:1080px){.strefy{grid-template-columns:360px 1fr}}
+.karta{background:var(--karta);border:1px solid var(--linia);border-radius:6px;padding:12px 14px;margin-bottom:12px}
+.karta h2{margin:0 0 10px;font-size:11px;letter-spacing:.07em;text-transform:uppercase;
+  color:var(--tekst-3);font-weight:700}
+.karta .pod{font-size:12px;color:var(--tekst-2);margin:-6px 0 10px}
+
+/* ---------- sterowanie ---------- */
+.pokretlo{border:2px solid var(--akcent);background:var(--karta)}
+.pokretlo .wart{font-size:34px;font-weight:700;color:var(--akcent);font-variant-numeric:tabular-nums}
+.suwak{margin-bottom:13px}
+.suwak .glowa{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.suwak label{font-size:13px;font-weight:600}
+.suwak .liczba{font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--akcent)}
+.suwak .podpis{font-size:11.5px;color:var(--tekst-2);margin:1px 0 3px;line-height:1.35}
+input[type=range]{width:100%;height:22px;accent-color:var(--akcent);margin:0}
+.znaczniki{position:relative;height:13px;font-size:10px;color:var(--tekst-3)}
+.znaczniki i{position:absolute;transform:translateX(-50%);font-style:normal;white-space:nowrap}
+.znaczniki i::before{content:"▲";display:block;text-align:center;font-size:7px;color:var(--linia-mocna)}
+.granica{font-size:11px;color:var(--uwaga);margin-top:2px;display:none}
+.suwak.na-granicy .granica{display:block}
+.pomoc{border:0;background:none;color:var(--tekst-3);cursor:pointer;font-size:12px;padding:0 3px}
+.pomoc:hover{color:var(--akcent)}
+.rozwiniecie{display:none;font-size:11px;color:var(--tekst-3);background:var(--tlo);
+  border-radius:4px;padding:6px 8px;margin-top:4px;line-height:1.4}
+.suwak.otwarty .rozwiniecie{display:block}
+.pola{display:grid;gap:9px}
+.polex label{font-size:12.5px;font-weight:600;display:block}
+.polex .podpis{font-size:11px;color:var(--tekst-2);margin:1px 0 3px}
+.polex input{width:100%;padding:5px 7px;border:1px solid var(--linia-mocna);border-radius:4px;
+  font:inherit;font-size:13px;font-variant-numeric:tabular-nums;background:var(--karta);color:var(--tekst)}
+.jedn{font-size:11px;color:var(--tekst-3);margin-left:4px}
+details summary{cursor:pointer;font-size:12px;font-weight:600;color:var(--akcent);padding:3px 0}
+.przelacznik{display:flex;align-items:center;gap:7px;font-size:12.5px;margin-top:8px}
+
+/* ---------- wykresy ---------- */
+.wykres{width:100%;height:auto;display:block;overflow:visible}
+.podpis-wykresu{font-size:13px;color:var(--tekst);margin-top:8px;line-height:1.45}
+.legenda{display:flex;flex-wrap:wrap;gap:12px;font-size:11.5px;color:var(--tekst-2);margin-top:7px}
+.legenda span{display:flex;align-items:center;gap:5px}
+.legenda i{width:11px;height:11px;border-radius:3px;display:inline-block}
+text{font-family:inherit}
+.siatka{stroke:var(--linia);stroke-width:1}
+.os{fill:var(--tekst-3);font-size:10px}
+.etykieta-serii{font-size:11px;font-weight:600}
+.tabela-widok{width:100%;border-collapse:collapse;font-size:11.5px;margin-top:8px;
   font-variant-numeric:tabular-nums}
-.werdykt .luka span{font-weight:400;font-size:12px;color:var(--przygaszony)}
-.zbiorczy{padding:14px 18px;border-radius:6px;margin-bottom:16px;font-weight:600}
-.zbiorczy.tak{background:#e8f4ea;border:1px solid var(--dobrze);color:var(--dobrze)}
-.zbiorczy.nie{background:#fbeaea;border:1px solid var(--zle);color:var(--zle)}
-.zbiorczy .wiazace{display:block;font-weight:400;color:var(--tekst);
-  font-size:13px;margin-top:5px}
+.tabela-widok th,.tabela-widok td{padding:3px 6px;border-bottom:1px solid var(--linia);text-align:right}
+.tabela-widok th:first-child,.tabela-widok td:first-child{text-align:left}
+.tabela-widok th{color:var(--tekst-3);font-weight:600}
 
-/* --- tabele --- */
-table{border-collapse:collapse;width:100%;font-size:12.5px;
-  font-variant-numeric:tabular-nums}
-th,td{text-align:right;padding:4px 7px;border-bottom:1px solid var(--linia)}
-th:first-child,td:first-child{text-align:left}
-thead th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;
-  color:var(--przygaszony);border-bottom:2px solid var(--linia)}
-tbody tr.granica td{background:var(--zolte);font-weight:600}
-td.tak{color:var(--dobrze)} td.nie{color:var(--zle)} td.brak{color:var(--przygaszony)}
-.przewijane{max-height:340px;overflow:auto}
-
-/* --- wykres --- */
-.wykres{position:relative;height:120px;border-bottom:1px solid var(--linia);
-  display:flex;align-items:flex-end;gap:1px;margin-top:8px}
-.slupek{flex:1;border-radius:2px 2px 0 0;position:relative;cursor:default}
-.slupek.d3{background:var(--dobrze)}
-.slupek.d2{background:#8fb98f}
-.slupek.d1{background:#e0a95c}
-.slupek.d0{background:var(--zle)}
-.slupek.brak{background:#cfcfcb}
-.slupek.tu{outline:2px solid var(--akcent);outline-offset:1px;z-index:2}
-.wykres-osie{display:flex;justify-content:space-between;font-size:11px;
-  color:var(--przygaszony);margin-top:3px}
-
-/* --- parametry --- */
-details.parametry summary{cursor:pointer;font-weight:600;font-size:13px;
-  color:var(--akcent);padding:4px 0}
-.pola{display:grid;gap:10px 16px}
-@media(min-width:800px){.pola{grid-template-columns:repeat(2,1fr)}}
-.pole{display:flex;flex-direction:column;gap:2px}
-.pole label{font-size:11.5px;color:var(--przygaszony)}
-.pole input{padding:5px 7px;border:1px solid var(--linia);border-radius:4px;
-  font:inherit;font-size:13px;font-variant-numeric:tabular-nums}
-.pole input.zly{border-color:var(--zle);background:#fdf0f0}
-.pole .podstawa{font-size:10.5px;color:var(--przygaszony)}
-fieldset{border:1px solid var(--linia);border-radius:5px;margin:0 0 14px;padding:12px 14px}
-legend{font-size:11px;text-transform:uppercase;letter-spacing:.05em;
-  color:var(--przygaszony);font-weight:700;padding:0 5px}
-
-button{background:var(--akcent);color:#fff;border:0;border-radius:4px;
-  padding:9px 16px;font:inherit;font-weight:600;cursor:pointer}
-button:disabled{opacity:.5;cursor:progress}
-button.wtorny{background:#fff;color:var(--akcent);border:1px solid var(--akcent)}
-
-.blad{background:#fbeaea;border:1px solid var(--zle);color:var(--zle);
-  padding:12px 14px;border-radius:5px;margin-bottom:16px;font-size:13px;white-space:pre-wrap}
-.ostrzezenie{background:var(--zolte);border-left:4px solid var(--uwaga);
-  padding:8px 12px;margin-bottom:7px;font-size:12.5px;border-radius:0 4px 4px 0}
-.ostrzezenie .kod{font-weight:700;color:var(--uwaga);font-size:11px;
-  letter-spacing:.03em;display:block}
-.ostrzezenie .podstawa{color:var(--przygaszony);font-size:11px;display:block;margin-top:3px}
-.zastrzezenia{background:#fdfcf7;border:1px solid var(--linia);border-radius:6px;
-  padding:14px 18px;font-size:12px;color:var(--przygaszony)}
-.zastrzezenia li{margin-bottom:6px}
-.komunikat{background:#e8f4ea;border:1px solid var(--dobrze);color:var(--dobrze);
-  padding:10px 14px;border-radius:5px;margin-top:10px;font-size:12.5px}
-.pasek{font-size:12px;color:var(--przygaszony);margin-bottom:12px}
-.na-m2{display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:10px}
-.na-m2 div{background:#fafaf8;border:1px solid var(--linia);border-radius:4px;padding:8px 10px}
-.na-m2 b{display:block;font-size:16px;font-variant-numeric:tabular-nums}
-.na-m2 span{font-size:11px;color:var(--przygaszony)}
+/* ---------- komunikaty ---------- */
+.komunikat{background:var(--karta);border:1px solid var(--linia);border-left:4px solid var(--uwaga);
+  border-radius:0 5px 5px 0;padding:8px 11px;margin-bottom:7px;font-size:12.5px;line-height:1.45}
+.komunikat.pilne{border-left-color:var(--zle)}
+.blad{background:#fbeaea;border:1px solid var(--zle);color:#8a1f1f;padding:11px 13px;
+  border-radius:5px;margin-bottom:12px;font-size:13px;white-space:pre-wrap}
+.przyciski{display:flex;gap:9px;flex-wrap:wrap;margin-top:10px}
+button.akcja{background:var(--akcent);color:#fff;border:0;border-radius:4px;padding:9px 15px;
+  font:inherit;font-weight:600;cursor:pointer}
+button.akcja.wtorny{background:transparent;color:var(--akcent);border:1px solid var(--akcent)}
+button.akcja:disabled{opacity:.55;cursor:progress}
+.zastrzezenia{font-size:11.5px;color:var(--tekst-2);line-height:1.55}
+.zastrzezenia li{margin-bottom:5px}
+.info{font-size:11.5px;color:var(--tekst-3)}
 </style>
 </head>
 <body>
 <header>
   <h1>Kalkulator montażu finansowego — prywatny SIM z umową z gminą</h1>
-  <p>Nie zastępuje wyliczenia BGK. Rekompensatę ustala wiążąco Bank.</p>
+  <span>Wynik orientacyjny. Wiążące jest wyliczenie Banku.</span>
 </header>
 
 <main>
   <div id="blad" class="blad" hidden></div>
-  <div class="pasek" id="pasek">Wczytywanie…</div>
+  <div id="sciagniecie" class="komunikat" hidden style="margin-bottom:10px"></div>
 
-  <div class="karta">
-    <h2>Udział puli komunalnej</h2>
-    <div class="pokretlo">
-      <div class="wartosc" id="udzial-wartosc">—</div>
-      <label>Główne pokrętło. Gmina chce jak najwięcej lokali komunalnych; inwestor
-        potrzebuje puli społecznej, żeby uciągnąć dźwignię kredytową i wyższy czynsz.</label>
-    </div>
-    <input type="range" id="udzial" min="0" max="100" step="5" value="30">
-    <div class="skala"><span>0% — czysto społeczna</span><span>50%</span>
-      <span>100% — czysto komunalna</span></div>
-  </div>
+  <div class="werdykty" id="werdykty"></div>
+  <div class="zdanie" id="zdanie">Liczenie…</div>
 
-  <div id="zbiorczy" class="zbiorczy nie">—</div>
-  <div class="siatka siatka-3" id="werdykty"></div>
+  <div class="strefy">
+    <!-- ============ STEROWANIE ============ -->
+    <div>
+      <div class="karta pokretlo">
+        <h2>Udział mieszkań komunalnych</h2>
+        <div class="wart" id="pokretlo-wart">—</div>
+        <div class="pod" id="pokretlo-podpis"></div>
+        <input type="range" id="pokretlo" min="0" max="100" step="5" value="30">
+        <div class="znaczniki" id="pokretlo-znaczniki"></div>
+      </div>
 
-  <div class="siatka siatka-2" style="margin-top:16px">
-    <div class="karta">
-      <h2>Punkt graniczny</h2>
-      <div id="sweep-podsumowanie" class="pasek">Liczenie sweepu…</div>
-      <div class="wykres" id="wykres"></div>
-      <div class="wykres-osie"><span>0%</span><span>50%</span><span>100%</span></div>
-      <div class="przewijane" style="margin-top:12px">
-        <table id="tabela-sweep">
-          <thead><tr><th>Udział</th><th>T1</th><th>T2</th><th>T3</th>
-            <th>Luka</th><th>Wiążące ograniczenie</th></tr></thead>
-          <tbody></tbody>
-        </table>
+      <div class="karta">
+        <h2>Skala projektu</h2>
+        <div class="pola" id="pola-liczbowe"></div>
+      </div>
+
+      <div class="karta">
+        <h2>Dźwignie</h2>
+        <div id="suwaki"></div>
+        <div class="przelacznik">
+          <input type="checkbox" id="tryb-reczny">
+          <label for="tryb-reczny">Ustal kredyt samodzielnie</label>
+        </div>
+        <div class="info" id="tryb-opis"></div>
+      </div>
+
+      <div class="karta">
+        <details id="panel-rynkowy">
+          <summary id="panel-rynkowy-tytul">Parametry rynkowe i wskaźniki</summary>
+          <div class="pola" id="parametry-rynkowe" style="margin-top:9px"></div>
+        </details>
       </div>
     </div>
-    <div class="karta">
-      <h2>Wskaźniki na m² PUM</h2>
-      <div class="na-m2" id="na-m2"></div>
-      <h2 style="margin-top:18px">Ranking parametrów</h2>
-      <table id="tabela-ranking">
-        <thead><tr><th>Parametr</th><th>Siła</th><th>Dźwignia</th></tr></thead>
-        <tbody></tbody>
-      </table>
+
+    <!-- ============ WYKRESY ============ -->
+    <div>
+      <div class="karta">
+        <h2>Skąd się biorą pieniądze</h2>
+        <svg id="w-kaskada" class="wykres" viewBox="0 0 620 250" role="img"
+             aria-label="Kaskada: od kosztu inwestycji przez dotację, kredyt i partycypację do wymaganego wkładu"></svg>
+        <div class="podpis-wykresu" id="p-kaskada"></div>
+      </div>
+
+      <div class="karta">
+        <h2>Ile mieszkań komunalnych się mieści</h2>
+        <div class="pod">Wymagany wkład własny przy różnym udziale mieszkań komunalnych.</div>
+        <svg id="w-negocjacja" class="wykres" viewBox="0 0 620 240" role="img"
+             aria-label="Krzywa wymaganego wkładu wobec udziału mieszkań komunalnych"></svg>
+        <div class="podpis-wykresu" id="p-negocjacja"></div>
+      </div>
+
+      <div class="karta">
+        <h2>Czynsz — trzy poziomy</h2>
+        <svg id="w-czynsz" class="wykres" viewBox="0 0 620 160" role="img"
+             aria-label="Porównanie czynszu domykającego, limitu i stawki rynkowej"></svg>
+        <div class="podpis-wykresu" id="p-czynsz"></div>
+      </div>
+
+      <div class="karta">
+        <h2>Zapas dopuszczalnej pomocy publicznej</h2>
+        <svg id="w-gauge" class="wykres" viewBox="0 0 620 175" role="img"
+             aria-label="Wskaźnik wykorzystania dopuszczalnej pomocy publicznej"></svg>
+        <div class="podpis-wykresu" id="p-gauge"></div>
+      </div>
+
+      <div class="karta">
+        <h2>Komunikaty</h2>
+        <div id="komunikaty"></div>
+        <div id="komunikaty-reszta"></div>
+      </div>
+
+      <div class="karta">
+        <details id="panel-przeplywy">
+          <summary>Pokaż przepływy rok po rok</summary>
+          <div style="margin-top:9px">
+            <svg id="w-przeplywy" class="wykres" viewBox="0 0 620 260" role="img"
+                 aria-label="Przychody, koszty, rata i saldo w kolejnych latach"></svg>
+            <div class="legenda" id="l-przeplywy"></div>
+            <div class="podpis-wykresu" id="p-przeplywy"></div>
+            <details style="margin-top:8px">
+              <summary>Widok tabelaryczny</summary>
+              <div style="max-height:260px;overflow:auto">
+                <table class="tabela-widok" id="t-przeplywy">
+                  <thead><tr><th>Rok</th><th>Przychody</th><th>Koszty</th><th>Rata</th><th>Saldo</th></tr></thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </details>
+          </div>
+        </details>
+      </div>
     </div>
   </div>
 
-  <div class="karta">
-    <h2>Pule</h2>
-    <table id="tabela-pule">
-      <thead><tr><th>Pula</th><th>Ścieżka</th><th>PUM</th><th>Grant</th><th>Kredyt</th>
-        <th>Partycypacja</th><th>Wkład własny</th><th>Czynsz</th><th>Limit</th>
-        <th>Min. DSCR</th></tr></thead>
-      <tbody></tbody>
-    </table>
-    <p class="pasek" style="margin:8px 0 0" id="limity-zrodla"></p>
-  </div>
-
-  <div class="karta">
-    <h2>Rekompensata</h2>
-    <table id="tabela-rekompensata">
-      <thead><tr><th>Pula</th><th>Ścieżka</th><th>KN</th><th>RZ</th><th>RUOIG</th>
-        <th>Nadwyżka</th><th>Próg</th><th>Do zwrotu</th><th>Werdykt</th></tr></thead>
-      <tbody></tbody>
-    </table>
-    <p class="pasek" style="margin:8px 0 0;color:var(--zle)">
-      Wiążące jest wyliczenie Banku. To jest wskazanie, nie rozstrzygnięcie.</p>
-    <div id="grunt-ujecie" class="pasek" style="margin:4px 0 0"></div>
-  </div>
-
-  <div class="karta">
-    <h2>Ostrzeżenia i założenia silnika</h2>
-    <div id="ostrzezenia"></div>
-  </div>
-
-  <div class="karta">
-    <details class="parametry">
-      <summary>Parametry — edycja</summary>
-      <div id="parametry" style="margin-top:12px"></div>
-      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px">
-        <button id="btn-zastosuj">Zastosuj i przelicz</button>
-        <button id="btn-arkusz" class="wtorny">Pobierz arkusz i użyte parametry</button>
-      </div>
-      <div id="komunikat" class="komunikat" hidden></div>
+  <div class="karta" style="margin-top:14px">
+    <div class="przyciski">
+      <button class="akcja" id="btn-arkusz">Pobierz arkusz i użyte założenia</button>
+    </div>
+    <div class="info" id="komunikat-zapisu" style="margin-top:8px"></div>
+    <details style="margin-top:12px">
+      <summary>Zastrzeżenia</summary>
+      <ul class="zastrzezenia" style="margin-top:8px">
+        <li>Narzędzie wspiera odsiewanie wariantów przed złożeniem wniosku i rozmowę z gminą
+          o proporcji mieszkań. Nie zastępuje wyliczenia Banku, opinii prawnej ani doradztwa
+          podatkowego.</li>
+        <li>Wysokość dopuszczalnej pomocy publicznej ustala wiążąco Bank. Wynik z tego ekranu
+          jest wskazaniem, nie rozstrzygnięciem.</li>
+        <li>Stałe prawne odczytano z tekstów obowiązujących w sierpniu 2026 r. Przed każdym
+          naborem sprawdź aktualność — parametry programów zmieniają się między edycjami,
+          a wskaźniki rynkowe w ogóle nie są elementem prawa.</li>
+        <li>Część rozstrzygnięć pozostaje niepotwierdzona i ma wpływ na wynik. Widać je
+          w komunikatach powyżej; pełny wykaz jest w arkuszu.</li>
+        <li>Narzędzie nie ocenia zdolności kredytowej inwestora ani nie prowadzi analizy
+          popytu — obłożenie jest parametrem wejściowym.</li>
+        <li>Cała arytmetyka wykonuje się po stronie silnika. Przeglądarka wyłącznie rysuje wyniki.</li>
+      </ul>
     </details>
-  </div>
-
-  <div class="zastrzezenia">
-    <strong>Zastrzeżenia</strong>
-    <ul>
-      <li>Narzędzie wspiera odsiewanie wariantów przed złożeniem wniosku i rozmowę z gminą
-        o proporcji pul. Nie zastępuje wyliczenia BGK, opinii prawnej ani doradztwa podatkowego.</li>
-      <li>Stałe prawne odczytano z tekstów jednolitych obowiązujących w sierpniu 2026 r.
-        Przed każdym naborem sprawdź aktualność: parametry programów zmieniają się między
-        edycjami, a stopy zewnętrzne w ogóle nie są elementem prawa.</li>
-      <li>Kwestie otwarte z rozdz. 10 specyfikacji pozostają nierozstrzygnięte i mają wpływ
-        na wynik. Przełączniki w sekcji parametrów pokazują, które wartości są założeniami.</li>
-      <li>Narzędzie nie ocenia zdolności kredytowej inwestora ani nie prowadzi analizy
-        popytu — obłożenie jest parametrem wejściowym.</li>
-      <li>Cała arytmetyka wykonuje się po stronie silnika w Pythonie. Przeglądarka wyłącznie
-        formatuje wyniki.</li>
-    </ul>
   </div>
 </main>
 
 <script>
 "use strict";
-// Przegladarka nie liczy niczego poza formatowaniem wyswietlania.
-// Kazda liczba na tej stronie pochodzi z /api — czyli z jedynego silnika.
+/* Przegladarka nie liczy niczego poza formatowaniem i rysowaniem.
+   Kazda liczba na tym ekranie pochodzi z /api — czyli z jedynego silnika. */
 
 const $ = (s) => document.querySelector(s);
-const zmiany = {};          // sciezka -> wartosc, nakladane na parametry serwera
-let parametry = null;
-let sweepWTle = null;
+const NS = "http://www.w3.org/2000/svg";
+const zmiany = {};
+let zakresy = null, sweep = null, liczenie = false, ponow = false;
 
-const zl = (x) => x == null ? "—" :
-  new Intl.NumberFormat("pl-PL", {maximumFractionDigits: 0}).format(x) + " zł";
-const zl2 = (x) => x == null ? "—" :
-  new Intl.NumberFormat("pl-PL", {minimumFractionDigits: 2, maximumFractionDigits: 2}).format(x);
+/* ---------- formatowanie ---------- */
+const nf = (min, max) => new Intl.NumberFormat("pl-PL",
+  {minimumFractionDigits: min, maximumFractionDigits: max});
+const zl0 = (x) => x == null ? "—" : nf(0,0).format(x) + " zł";
+const zl2 = (x) => x == null ? "—" : nf(2,2).format(x);
 const proc = (x, m) => x == null ? "—" :
-  new Intl.NumberFormat("pl-PL", {style: "percent", maximumFractionDigits: m ?? 0}).format(x);
-const licz = (x, m) => x == null ? "—" :
-  new Intl.NumberFormat("pl-PL", {minimumFractionDigits: m ?? 3, maximumFractionDigits: m ?? 3}).format(x);
-
-function pokazBlad(tekst) {
-  const el = $("#blad");
-  el.textContent = "";
-  el.hidden = !tekst;
-  if (!tekst) return;
-  el.appendChild(document.createTextNode(tekst));
-  // Skrót do diagnostyki — jeden klik zamiast tłumaczenia, gdzie jej szukać.
-  const stopka = document.createElement("div");
-  stopka.style.marginTop = "10px";
-  stopka.style.fontSize = "12px";
-  const a = document.createElement("a");
-  a.href = "/api/diag";
-  a.target = "_blank";
-  a.rel = "noopener";
-  a.textContent = "Otwórz diagnostykę środowiska (/api/diag)";
-  stopka.appendChild(a);
-  el.appendChild(stopka);
+  new Intl.NumberFormat("pl-PL", {style:"percent", maximumFractionDigits: m ?? 0}).format(x);
+function mln(x){
+  if (x == null) return "—";
+  const a = Math.abs(x);
+  if (a >= 1e6) return nf(1,1).format(x/1e6) + " mln zł";
+  if (a >= 1e3) return nf(0,0).format(x/1e3) + " tys. zł";
+  return zl0(x);
+}
+function wgFormatu(f, v){
+  if (v == null) return "—";
+  if (f === "procent") return proc(v);
+  if (f === "procent_dokladny") return proc(v, 2);
+  if (f === "stawka") return zl2(v);
+  return nf(0,0).format(v);
 }
 
-async function api(sciezka, ciało) {
-  const opcje = ciało
-    ? {method: "POST", headers: {"Content-Type": "application/json"},
-       body: JSON.stringify(ciało)}
-    : {method: "GET"};
+/* ---------- pomocnicze SVG ---------- */
+function el(nazwa, atrybuty, tresc){
+  const e = document.createElementNS(NS, nazwa);
+  for (const [k,v] of Object.entries(atrybuty||{})) if (v != null) e.setAttribute(k, v);
+  if (tresc != null) e.textContent = tresc;
+  return e;
+}
+function czysc(svg){ while (svg.firstChild) svg.removeChild(svg.firstChild); }
+function tytulHover(rodzic, tekst){ rodzic.appendChild(el("title", {}, tekst)); }
 
+/* ================= WYKRES 1 — kaskada ================= */
+function rysujKaskade(k){
+  const svg = $("#w-kaskada"); czysc(svg);
+  const W = 620, H = 250, L = 8, R = 8, GORA = 22, DOL = 46;
+  const kroki = k.kroki;
+  const maks = Math.max(...kroki.map(x => Math.abs(x.kwota)), k.dostepny || 0,
+                        kroki[0].kwota) * 1.08;
+  const skala = (v) => (H - GORA - DOL) * (v / maks);
+  const szer = (W - L - R) / kroki.length;
+  const slupek = szer * 0.62;
+  const BAZA = H - DOL;
+  const barwy = ["var(--neutral)", "var(--s1)", "var(--s2)", "var(--s3)", "var(--s7)"];
+
+  // linia progowa zadeklarowanego kapitalu
+  if (k.dostepny != null){
+    const y = BAZA - skala(k.dostepny);
+    svg.appendChild(el("line", {x1:L, y1:y, x2:W-R, y2:y, stroke:"var(--tekst-3)",
+      "stroke-width":1.5, "stroke-dasharray":"5 4"}));
+    svg.appendChild(el("text", {x:W-R, y:y-5, "text-anchor":"end", class:"os",
+      fill:"var(--tekst-2)"}, "Twój kapitał: " + mln(k.dostepny)));
+  }
+
+  let biezace = 0;
+  kroki.forEach((krok, i) => {
+    const x = L + i*szer + (szer-slupek)/2;
+    let od, doWys;
+    if (krok.rodzaj === "suma"){ od = 0; doWys = krok.kwota; biezace = krok.kwota; }
+    else if (krok.rodzaj === "odjecie"){ od = biezace + krok.kwota; doWys = biezace; biezace += krok.kwota; }
+    else { od = 0; doWys = krok.kwota; }
+    const y = BAZA - skala(doWys), h = Math.max(2, skala(doWys) - skala(od));
+    const g = el("g", {});
+    g.appendChild(el("rect", {x, y, width:slupek, height:h, rx:4, fill:barwy[i],
+      stroke:"var(--karta)", "stroke-width":2}));
+    tytulHover(g, krok.etykieta + ": " + zl0(Math.abs(krok.kwota)));
+    // etykieta wprost przy kazdym slupku — wymagana ulga przy niskim kontrascie
+    g.appendChild(el("text", {x:x+slupek/2, y:y-6, "text-anchor":"middle",
+      class:"etykieta-serii", fill:"var(--tekst)"}, mln(Math.abs(krok.kwota))));
+    g.appendChild(el("text", {x:x+slupek/2, y:BAZA+15, "text-anchor":"middle",
+      class:"os"}, krok.etykieta));
+    if (krok.rodzaj === "wynik")
+      g.appendChild(el("text", {x:x+slupek/2, y:BAZA+30, "text-anchor":"middle",
+        class:"os", fill:"var(--s7)"}, "= odpowiedź"));
+    svg.appendChild(g);
+    // lacznik miedzy slupkami
+    if (i < kroki.length-1 && krok.rodzaj !== "wynik"){
+      const yl = BAZA - skala(krok.rodzaj === "suma" ? krok.kwota : biezace);
+      svg.appendChild(el("line", {x1:x+slupek, y1:yl, x2:L+(i+1)*szer+(szer-slupek)/2,
+        y2:yl, stroke:"var(--linia-mocna)", "stroke-width":1, "stroke-dasharray":"3 3"}));
+    }
+  });
+  svg.appendChild(el("line", {x1:L, y1:BAZA, x2:W-R, y2:BAZA, class:"siatka"}));
+
+  let zdanie = k.zdanie;
+  if (k.roznica != null)
+    zdanie += k.roznica >= 0
+      ? ` Zostaje zapas ${mln(k.roznica)}.`
+      : ` Brakuje ${mln(-k.roznica)}.`;
+  $("#p-kaskada").textContent = zdanie;
+}
+
+/* ================= WYKRES 2 — krzywa negocjacyjna ================= */
+function rysujNegocjacje(s, biezacyUdzial){
+  const svg = $("#w-negocjacja"); czysc(svg);
+  const W = 620, H = 240, L = 62, R = 14, GORA = 14, DOL = 40;
+  const pkt = s.punkty.filter(p => p.policzalny && p.wklad_wymagany != null);
+  if (!pkt.length){
+    svg.appendChild(el("text", {x:W/2, y:H/2, "text-anchor":"middle", class:"os"},
+      "Brak policzalnych punktów."));
+    $("#p-negocjacja").textContent = s.podsumowanie;
+    return;
+  }
+  const maks = Math.max(...pkt.map(p => p.wklad_wymagany)) * 1.1;
+  const x = (u) => L + (W-L-R) * u;
+  const y = (v) => H - DOL - (H-GORA-DOL) * (v / maks);
+
+  // pasma tla: zielone tam, gdzie wszystkie trzy warunki sa spelnione
+  const krok = 0.05;
+  pkt.forEach((p) => {
+    const x1 = x(Math.max(0, p.udzial - krok/2)), x2 = x(Math.min(1, p.udzial + krok/2));
+    svg.appendChild(el("rect", {x:x1, y:GORA, width:Math.max(1,x2-x1), height:H-GORA-DOL,
+      fill: p.domyka_sie ? "var(--pasmo-ok)" : "var(--pasmo-zle)"}));
+  });
+
+  // os pozioma i pionowa
+  for (let i = 0; i <= 4; i++){
+    const v = maks * i/4, yy = y(v);
+    svg.appendChild(el("line", {x1:L, y1:yy, x2:W-R, y2:yy, class:"siatka"}));
+    svg.appendChild(el("text", {x:L-7, y:yy+3, "text-anchor":"end", class:"os"}, mln(v)));
+  }
+  [0,.25,.5,.75,1].forEach((u) => {
+    svg.appendChild(el("text", {x:x(u), y:H-DOL+15, "text-anchor":"middle", class:"os"},
+      proc(u)));
+  });
+
+  const d = pkt.map((p,i) => (i ? "L" : "M") + x(p.udzial).toFixed(1) + " " + y(p.wklad_wymagany).toFixed(1)).join(" ");
+  svg.appendChild(el("path", {d, fill:"none", stroke:"var(--s1)", "stroke-width":2,
+    "stroke-linejoin":"round"}));
+  pkt.forEach((p) => {
+    const g = el("g", {});
+    g.appendChild(el("circle", {cx:x(p.udzial), cy:y(p.wklad_wymagany), r:4,
+      fill:"var(--s1)", stroke:"var(--karta)", "stroke-width":2}));
+    tytulHover(g, `${proc(p.udzial)} mieszkań komunalnych — wkład ${zl0(p.wklad_wymagany)}` +
+      (p.domyka_sie ? " — montaż się domyka" : " — montaż się nie domyka"));
+    svg.appendChild(g);
+  });
+
+  // granica domkniecia
+  if (s.punkt_graniczny != null){
+    const xg = x(s.punkt_graniczny);
+    svg.appendChild(el("line", {x1:xg, y1:GORA, x2:xg, y2:H-DOL, stroke:"var(--zle)",
+      "stroke-width":1.5, "stroke-dasharray":"4 3"}));
+    svg.appendChild(el("text", {x:xg-5, y:GORA+11, "text-anchor":"end", class:"etykieta-serii",
+      fill:"var(--zle)"}, "granica " + proc(s.punkt_graniczny)));
+  }
+  // znacznik biezacego ustawienia
+  const xb = x(biezacyUdzial);
+  svg.appendChild(el("line", {x1:xb, y1:GORA, x2:xb, y2:H-DOL, stroke:"var(--akcent)",
+    "stroke-width":2}));
+  svg.appendChild(el("text", {x:xb+5, y:H-DOL-5, class:"etykieta-serii", fill:"var(--akcent)"},
+    "tu jesteś"));
+  svg.appendChild(el("text", {x:(L+W-R)/2, y:H-6, "text-anchor":"middle", class:"os"},
+    "udział mieszkań komunalnych"));
+
+  $("#p-negocjacja").textContent = s.podsumowanie;
+}
+
+/* ================= WYKRES 3 — trzy poziomy czynszu ================= */
+function rysujCzynsz(c){
+  const svg = $("#w-czynsz"); czysc(svg);
+  const W = 620, H = 160, L = 168, R = 96, GORA = 10;
+  const pozycje = [
+    {n:"Potrzebny, by spłacał się sam", v:c.potrzebny, k:"var(--s1)"},
+    {n:"Limit ustawowy", v:c.limit, k:"var(--s2)"},
+    {n:"Stawka rynkowa", v:c.rynkowy, k:"var(--s3)"},
+  ].filter(p => p.v != null);
+  const maks = Math.max(...pozycje.map(p => p.v)) * 1.1 || 1;
+  const wys = 26, odstep = 14;
+  pozycje.forEach((p, i) => {
+    const y = GORA + i*(wys+odstep);
+    const dl = (W-L-R) * (p.v/maks);
+    svg.appendChild(el("text", {x:L-10, y:y+wys/2+4, "text-anchor":"end", class:"os",
+      fill:"var(--tekst-2)"}, p.n));
+    const g = el("g", {});
+    g.appendChild(el("rect", {x:L, y, width:Math.max(2,dl), height:wys, rx:4, fill:p.k,
+      stroke:"var(--karta)", "stroke-width":2}));
+    tytulHover(g, p.n + ": " + zl2(p.v) + " zł/m² miesięcznie");
+    g.appendChild(el("text", {x:L+dl+8, y:y+wys/2+4, class:"etykieta-serii", fill:"var(--tekst)"},
+      zl2(p.v) + " zł/m²"));
+    svg.appendChild(g);
+  });
+  // zakladany czynsz jako znacznik pionowy
+  if (c.zakladany != null){
+    const xz = L + (W-L-R) * (c.zakladany/maks);
+    svg.appendChild(el("line", {x1:xz, y1:GORA-4, x2:xz, y2:GORA+pozycje.length*(wys+odstep)-odstep+4,
+      stroke:"var(--tekst-3)", "stroke-width":1.5, "stroke-dasharray":"4 3"}));
+    svg.appendChild(el("text", {x:xz, y:GORA+pozycje.length*(wys+odstep)+6, "text-anchor":"middle",
+      class:"os"}, "ustawiony " + zl2(c.zakladany)));
+  }
+  $("#p-czynsz").textContent = c.zdanie;
+}
+
+/* ================= WYKRES 4 — zapas pomocy publicznej ================= */
+function rysujGauge(g){
+  const svg = $("#w-gauge"); czysc(svg);
+  const W = 620, H = 175, cx = W/2, cy = 132, r = 92, gr = 20;
+  if (g.wykorzystanie == null){
+    svg.appendChild(el("text", {x:cx, y:cy, "text-anchor":"middle", class:"os"}, "Brak danych."));
+    $("#p-gauge").textContent = g.zdanie || "";
+    return;
+  }
+  // skala 0..125%, strefa ostrzegawcza powyzej 100%
+  const MAKS = 1.25;
+  const kat = (u) => Math.PI * (1 + Math.min(u, MAKS)/MAKS);
+  const luk = (od, do_, promien, szer, kolor) => {
+    const a1 = kat(od), a2 = kat(do_);
+    const x1 = cx + promien*Math.cos(a1), y1 = cy + promien*Math.sin(a1);
+    const x2 = cx + promien*Math.cos(a2), y2 = cy + promien*Math.sin(a2);
+    return el("path", {d:`M ${x1} ${y1} A ${promien} ${promien} 0 0 1 ${x2} ${y2}`,
+      fill:"none", stroke:kolor, "stroke-width":szer, "stroke-linecap":"round"});
+  };
+  svg.appendChild(luk(0, 1, r, gr, "var(--linia)"));
+  svg.appendChild(luk(1, MAKS, r, gr, "var(--pasmo-zle)"));
+  const przekracza = g.wykorzystanie > 1;
+  svg.appendChild(luk(0, g.wykorzystanie, r, gr,
+    przekracza ? "var(--zle)" : "var(--dobrze)"));
+  // znacznik limitu
+  const a = kat(1);
+  svg.appendChild(el("line", {
+    x1: cx + (r-gr/2-3)*Math.cos(a), y1: cy + (r-gr/2-3)*Math.sin(a),
+    x2: cx + (r+gr/2+3)*Math.cos(a), y2: cy + (r+gr/2+3)*Math.sin(a),
+    stroke:"var(--tekst)", "stroke-width":2}));
+  svg.appendChild(el("text", {x:cx + (r+gr/2+14)*Math.cos(a), y:cy + (r+gr/2+14)*Math.sin(a),
+    "text-anchor":"middle", class:"os", fill:"var(--tekst-2)"}, "limit"));
+  svg.appendChild(el("text", {x:cx, y:cy-14, "text-anchor":"middle",
+    style:"font-size:32px;font-weight:700", fill: przekracza ? "var(--zle)" : "var(--dobrze)"},
+    proc(g.wykorzystanie)));
+  svg.appendChild(el("text", {x:cx, y:cy+8, "text-anchor":"middle", class:"os"},
+    "dopuszczalnej pomocy publicznej"));
+  svg.appendChild(el("text", {x:cx-r, y:cy+18, "text-anchor":"middle", class:"os"}, "0%"));
+  svg.appendChild(el("text", {x:cx+r, y:cy+18, "text-anchor":"middle", class:"os"}, "125%"));
+  $("#p-gauge").textContent = g.zdanie;
+}
+
+/* ================= WYKRES 5 — przeplywy ================= */
+function rysujPrzeplywy(p){
+  const svg = $("#w-przeplywy"); czysc(svg);
+  const W = 620, H = 260, L = 66, R = 78, GORA = 14, DOL = 34;
+  const lata = p.lata; if (!lata.length) return;
+  const serie = [
+    {n:"Przychody", k:"przychody", c:"var(--s1)"},
+    {n:"Koszty", k:"koszty", c:"var(--s2)"},
+    {n:"Rata", k:"rata", c:"var(--s3)"},
+    {n:"Saldo", k:"saldo", c:"var(--s4)"},
+  ];
+  const wsz = serie.flatMap(s => lata.map(l => l[s.k] ?? 0));
+  const maks = Math.max(...wsz, 0), min = Math.min(...wsz, 0);
+  const x = (i) => L + (W-L-R) * (i/(lata.length-1 || 1));
+  const y = (v) => H - DOL - (H-GORA-DOL) * ((v-min)/((maks-min) || 1));
+
+  for (let i = 0; i <= 4; i++){
+    const v = min + (maks-min)*i/4, yy = y(v);
+    svg.appendChild(el("line", {x1:L, y1:yy, x2:W-R, y2:yy, class:"siatka"}));
+    svg.appendChild(el("text", {x:L-7, y:yy+3, "text-anchor":"end", class:"os"}, mln(v)));
+  }
+  if (min < 0) svg.appendChild(el("line", {x1:L, y1:y(0), x2:W-R, y2:y(0),
+    stroke:"var(--linia-mocna)", "stroke-width":1.5}));
+
+  serie.forEach((s) => {
+    const d = lata.map((l,i) => (i ? "L" : "M") + x(i).toFixed(1) + " " + y(l[s.k] ?? 0).toFixed(1)).join(" ");
+    svg.appendChild(el("path", {d, fill:"none", stroke:s.c, "stroke-width":2,
+      "stroke-linejoin":"round"}));
+    // etykieta wprost na koncu linii — wymagana ulga przy niskim kontrascie
+    const ost = lata[lata.length-1][s.k] ?? 0;
+    svg.appendChild(el("text", {x:W-R+6, y:y(ost)+3, class:"etykieta-serii", fill:s.c}, s.n));
+  });
+
+  [0, Math.floor(lata.length/2), lata.length-1].forEach((i) => {
+    svg.appendChild(el("text", {x:x(i), y:H-DOL+15, "text-anchor":"middle", class:"os"},
+      "rok " + lata[i].rok));
+  });
+  if (p.pierwszy_rok_ujemny != null){
+    const i = lata.findIndex(l => l.rok === p.pierwszy_rok_ujemny);
+    if (i >= 0){
+      svg.appendChild(el("line", {x1:x(i), y1:GORA, x2:x(i), y2:H-DOL, stroke:"var(--zle)",
+        "stroke-width":1.5, "stroke-dasharray":"4 3"}));
+      svg.appendChild(el("text", {x:x(i)+5, y:GORA+11, class:"etykieta-serii", fill:"var(--zle)"},
+        "saldo ujemne"));
+    }
+  }
+  $("#l-przeplywy").innerHTML = serie.map(s =>
+    `<span><i style="background:${s.c}"></i>${s.n}</span>`).join("");
+  $("#p-przeplywy").textContent = p.pierwszy_rok_ujemny != null
+    ? `Saldo roczne schodzi poniżej zera po raz pierwszy w roku ${p.pierwszy_rok_ujemny}.`
+    : "Saldo roczne pozostaje dodatnie przez cały okres.";
+  $("#t-przeplywy").tBodies[0].innerHTML = lata.map(l =>
+    `<tr><td>${l.rok}</td><td>${zl0(l.przychody)}</td><td>${zl0(l.koszty)}</td>
+     <td>${zl0(l.rata)}</td><td>${zl0(l.saldo)}</td></tr>`).join("");
+}
+</script>
+
+<script>
+"use strict";
+
+/* ================= komunikacja z silnikiem ================= */
+async function api(sciezka, cialo){
+  const opcje = cialo
+    ? {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(cialo)}
+    : {method:"GET"};
   let odp;
-  try {
-    odp = await fetch(sciezka, opcje);
-  } catch (e) {
-    // Sieć nie doszła do serwera — bez statusu nie ma czego interpretować.
-    throw new Error(`Nie udało się połączyć z ${sciezka}: ${e.message}`);
-  }
-
-  // Treść czytamy jako tekst, zanim spróbujemy JSON-a. Gdy odpowiedź nie jest
-  // JSON-em (strona błędu platformy, przekierowanie logowania), sam komunikat
-  // parsera nic nie mówi — a status i początek treści mówią wszystko.
+  try { odp = await fetch(sciezka, opcje); }
+  catch(e){ throw new Error(`Nie udało się połączyć z ${sciezka}: ${e.message}`); }
   const tekst = await odp.text();
-  let dane = null;
-  try {
-    dane = JSON.parse(tekst);
-  } catch (e) {
-    throw new Error(
-      `${sciezka} zwróciło HTTP ${odp.status} ${odp.statusText}, ale nie JSON.\n` +
-      `Początek odpowiedzi:\n${tekst.slice(0, 400)}`
-    );
+  let dane;
+  try { dane = JSON.parse(tekst); }
+  catch(e){
+    throw new Error(`${sciezka} zwróciło HTTP ${odp.status} ${odp.statusText}, ale nie JSON.\n` +
+      `Początek odpowiedzi:\n${tekst.slice(0,400)}`);
   }
-
-  if (!dane.ok) {
-    const etykieta = dane.typ === "walidacja" ? "Walidacja zatrzymała obliczenie"
+  if (!dane.ok){
+    const etykieta = dane.typ === "walidacja" ? "Dane nie pozwalają policzyć wariantu"
                    : dane.typ === "obliczenie" ? "Silnik przerwał obliczenie"
                    : dane.typ === "start" ? "Silnik nie wystartował"
                    : `Błąd (HTTP ${odp.status})`;
-    const szczegol = dane.podpowiedz ? `\n\n${dane.podpowiedz}` : "";
-    throw new Error(`${etykieta}:\n${dane.powod || tekst.slice(0, 400)}${szczegol}`);
+    throw new Error(`${etykieta}:\n${dane.powod || tekst.slice(0,400)}` +
+      (dane.podpowiedz ? `\n\n${dane.podpowiedz}` : ""));
   }
   return dane;
 }
-
-function biezaceZmiany() {
-  const kopia = Object.assign({}, zmiany);
-  kopia["powierzchnie.udzial_puli_komunalnej"] = Number($("#udzial").value) / 100;
-  return kopia;
+function pokazSciagniecie(tekst){
+  const e = $("#sciagniecie");
+  e.textContent = tekst;
+  e.hidden = false;
+  clearTimeout(pokazSciagniecie._t);
+  pokazSciagniecie._t = setTimeout(() => { e.hidden = true; }, 9000);
 }
 
-// ---------------------------------------------------------------- werdykty
-function rysujWerdykty(w) {
-  $("#pasek").textContent =
-    `${w.projekt} — gmina ${w.gmina}. Koszty przedsięwzięcia ${zl(w.koszty_laczne)}.`;
-
-  const zb = $("#zbiorczy");
-  zb.className = "zbiorczy " + (w.domyka_sie ? "tak" : "nie");
-  zb.innerHTML = (w.domyka_sie
-      ? "Montaż domyka się — przechodzą wszystkie trzy testy."
-      : "Montaż się nie domyka.")
-    + `<span class="wiazace">Wiążące ograniczenie: ${w.wiazace_ograniczenie}</span>`;
-
-  // Powod jest widoczny od razu, nie za klinieciem. Werdykt zawsze z liczba.
-  $("#werdykty").innerHTML = w.werdykty.map((t) => `
-    <div class="werdykt ${t.przechodzi ? "tak" : "nie"}">
-      <h3>Test ${t.numer} — ${t.nazwa}</h3>
-      <div class="status">${t.status}</div>
-      <div class="ograniczenie">${t.wiazace_ograniczenie}</div>
-      ${t.przechodzi ? "" : `<div class="luka">${
-        t.luka_jednostka === "zł" || t.luka_jednostka === "zl"
-          ? zl(t.luka_kwota) : zl2(t.luka_kwota) + " " + t.luka_jednostka
-      } <span>— ${t.luka_opis}</span></div>`}
-    </div>`).join("");
-
-  const m = w.na_m2;
-  $("#na-m2").innerHTML = [
-    ["Koszt", m.koszt], ["Grant", m.grant], ["Kredyt", m.kredyt],
-    ["Partycypacja", m.partycypacja], ["Wkład własny", m.wklad_wlasny],
-    ["Luka kapitałowa", m.luka_kapitalowa],
-  ].map(([n, v]) => `<div><b>${zl2(v)}</b><span>${n} — zł/m² PUM</span></div>`).join("");
-
-  $("#tabela-pule").tBodies[0].innerHTML = w.pule.map((p) => `
-    <tr><td>${p.nazwa}</td><td>${p.sciezka}</td><td>${licz(p.pum, 0)} m²</td>
-    <td>${zl(p.grant)}</td><td>${zl(p.kredyt)}</td><td>${zl(p.partycypacja)}</td>
-    <td>${zl(p.wklad_wlasny)}</td><td>${zl2(p.czynsz)}</td>
-    <td>${zl2(p.limit_czynszu)}</td>
-    <td class="${p.min_dscr == null ? "brak" : (p.min_dscr >= 1 ? "tak" : "nie")}">
-      ${p.min_dscr == null ? "—" : licz(p.min_dscr)}</td></tr>`).join("");
-
-  $("#limity-zrodla").innerHTML = w.pule.map((p) =>
-    `<strong>${p.nazwa}:</strong> udział wsparcia ${proc(p.udzial_wsparcia, 1)} → stawka
-     ${proc(p.stawka_art_7c, 1)} rocznie od podstawy ${zl2(p.podstawa_m2)} zł/m²
-     (${p.podstawa_zrodlo}); wiąże ${p.limit_zrodlo}. Opłaty poza czynszem do
-     ${zl2(p.oplaty_poza_czynszem)} zł/m²/mies. — osobny strumień, nie doliczany do czynszu.`
-  ).join("<br>");
-
-  $("#tabela-rekompensata").tBodies[0].innerHTML = w.rekompensata.map((r) => `
-    <tr><td>${r.nazwa}</td><td>${r.sciezka}</td><td>${zl(r.kn)}</td><td>${zl(r.rz)}</td>
-    <td>${zl(r.ruoig)}</td><td>${zl(r.nadwyzka)}</td>
-    <td>${proc(r.prog_tolerancji)}</td><td>${zl(r.kwota_do_zwrotu)}</td>
-    <td class="${r.przechodzi ? "tak" : "nie"}">${r.przechodzi ? "przechodzi" : "nie przechodzi"}</td>
-    </tr>`).join("");
-  $("#grunt-ujecie").innerHTML = w.rekompensata.map((r) =>
-    `<strong>${r.nazwa}:</strong> ${r.grunt_ujecie}`).join("<br>");
-
-  $("#ostrzezenia").innerHTML = w.ostrzezenia.length
-    ? w.ostrzezenia.map((o) => `<div class="ostrzezenie"><span class="kod">${o.kod}</span>
-        ${o.tresc}<span class="podstawa">${o.podstawa}</span></div>`).join("")
-    : '<div class="pasek">Brak ostrzeżeń.</div>';
+function pokazBlad(tekst){
+  const e = $("#blad");
+  e.textContent = "";
+  e.hidden = !tekst;
+  if (!tekst) return;
+  // Widok glowny nie pokazuje numerow przepisow (kryterium 7). Zdanie wiodace
+  // zostaje na wierzchu, techniczny szczegol ladzie pod rozwinieciem.
+  const [wiodace, ...reszta] = tekst.split("\n");
+  const naglowek = document.createElement("div");
+  naglowek.textContent = wiodace;
+  naglowek.style.fontWeight = "600";
+  e.appendChild(naglowek);
+  const szczegol = reszta.join("\n").trim();
+  if (szczegol){
+    const d = document.createElement("details");
+    d.style.marginTop = "6px";
+    const s2 = document.createElement("summary");
+    s2.textContent = "Szczegóły techniczne";
+    s2.style.cursor = "pointer";
+    const pre = document.createElement("div");
+    pre.textContent = szczegol;
+    pre.style.cssText = "margin-top:5px;font-size:12px;white-space:pre-wrap";
+    d.appendChild(s2); d.appendChild(pre); e.appendChild(d);
+  }
+  const stopka = document.createElement("div");
+  stopka.style.cssText = "margin-top:8px;font-size:12px";
+  const a = document.createElement("a");
+  a.href = "/api/diag"; a.target = "_blank"; a.rel = "noopener";
+  a.textContent = "Sprawdź stan środowiska";
+  stopka.appendChild(a); e.appendChild(stopka);
 }
 
-// ---------------------------------------------------------------- sweep
-function rysujSweep(s) {
-  $("#sweep-podsumowanie").textContent = s.podsumowanie;
-  const biezacy = Number($("#udzial").value) / 100;
+/* ================= pasek werdyktu ================= */
+function rysujWerdykty(w){
+  const kaskada = w.wykresy.kaskada;
+  const opisy = {
+    1: {liczba: mln(kaskada.wymagany), opis: "wymagany wkład własny"},
+    2: {liczba: null, opis: ""},
+    3: {liczba: null, opis: ""},
+  };
+  const czynsz = w.pule.find(p => p.nazwa === "spoleczna") || w.pule[0];
+  if (czynsz) opisy[2] = {liczba: zl2(czynsz.czynsz) + " zł/m²",
+                          opis: "przy limicie " + zl2(czynsz.limit_czynszu) + " zł/m²"};
+  const zapas = w.wykresy.rekompensata_zapas;
+  opisy[3] = {liczba: proc(zapas.wykorzystanie), opis: "dopuszczalnej pomocy publicznej"};
 
-  $("#wykres").innerHTML = s.punkty.map((p) => {
-    const zdane = p.policzalny ? p.werdykty.filter(Boolean).length : -1;
-    const klasa = !p.policzalny ? "brak" : "d" + zdane;
-    const wys = !p.policzalny ? 12 : 28 + zdane * 30;
-    const tu = Math.abs(p.udzial - biezacy) < 1e-9 ? " tu" : "";
-    const tytul = p.policzalny
-      ? `${Math.round(p.udzial * 100)}% — ${zdane}/3 testów. ${p.wiazace_ograniczenie}`
-      : `${Math.round(p.udzial * 100)}% — niepoliczalny. ${p.powod}`;
-    return `<div class="slupek ${klasa}${tu}" style="height:${wys}px" title="${
-      tytul.replace(/"/g, "&quot;")}"></div>`;
+  $("#werdykty").innerHTML = w.werdykty.map((t) => {
+    const o = opisy[t.numer];
+    return `<div class="pole ${t.przechodzi ? "tak" : "nie"}">
+      <div class="nazwa"><span class="ikona">${t.przechodzi ? "✓" : "✗"}</span>${t.nazwa}</div>
+      <div class="liczba">${o.liczba ?? "—"}</div>
+      <div class="opis">${o.opis}</div>
+    </div>`;
   }).join("");
 
-  $("#tabela-sweep").tBodies[0].innerHTML = s.punkty.map((p) => {
-    const kom = (i) => p.policzalny
-      ? `<td class="${p.werdykty[i] ? "tak" : "nie"}">${p.werdykty[i] ? "tak" : "nie"}</td>`
-      : '<td class="brak">—</td>';
-    const luka = p.luki.length
-      ? (p.luki[0].jednostka === "zł" || p.luki[0].jednostka === "zl"
-          ? zl(p.luki[0].kwota) : zl2(p.luki[0].kwota) + " " + p.luki[0].jednostka)
-      : "—";
-    const granica = s.punkt_graniczny != null
-      && Math.abs(p.udzial - s.punkt_graniczny) < 1e-9;
-    return `<tr class="${granica ? "granica" : ""}"><td>${proc(p.udzial)}</td>
-      ${kom(0)}${kom(1)}${kom(2)}<td>${luka}</td>
-      <td style="text-align:left;font-size:11.5px">${
-        (p.powod || p.wiazace_ograniczenie).slice(0, 130)}</td></tr>`;
+  const domyka = w.domyka_sie;
+  $("#zdanie").innerHTML = domyka
+    ? `<b>Montaż się domyka.</b> ${kaskada.zdanie}`
+    : `<b>Montaż się nie domyka.</b> ${zdanieOgraniczenia(w)}`;
+}
+function zdanieOgraniczenia(w){
+  const blokujacy = w.werdykty.find(t => !t.przechodzi);
+  if (!blokujacy) return w.wiazace_ograniczenie;
+  return "Decyduje: " + blokujacy.wiazace_ograniczenie;
+}
+
+/* ================= komunikaty ================= */
+function rysujKomunikaty(w){
+  const wszystkie = w.ostrzezenia;
+  const glowne = wszystkie.slice(0, 3);
+  const reszta = wszystkie.slice(3);
+  $("#komunikaty").innerHTML = glowne.length
+    ? glowne.map(o => `<div class="komunikat${o.waga >= 3 ? " pilne" : ""}">${o.tresc}</div>`).join("")
+    : `<div class="info">Brak uwag do tego wariantu.</div>`;
+  $("#komunikaty-reszta").innerHTML = reszta.length
+    ? `<details><summary>Pokaż pozostałe (${reszta.length})</summary>
+       <div style="margin-top:7px">${reszta.map(o =>
+         `<div class="komunikat">${o.tresc}</div>`).join("")}</div></details>`
+    : "";
+}
+
+/* ================= sterowanie ================= */
+function wartoscSuwaka(s){
+  // Suwaki chodza po liczbach calkowitych; wartosc dziedzinowa odtwarzamy z kroku.
+  return {kroki: Math.round((s.max - s.min) / s.krok), naWartosc: (i) => s.min + i * s.krok};
+}
+function rysujSuwaki(z){
+  const pokretlo = z.suwaki.find(s => s.klucz === "powierzchnie.udzial_puli_komunalnej");
+  $("#pokretlo-podpis").textContent = pokretlo.podpis;
+  $("#pokretlo-wart").textContent = proc(pokretlo.wartosc);
+  const el0 = $("#pokretlo");
+  el0.value = Math.round(pokretlo.wartosc * 100);
+
+  const reszta = z.suwaki.filter(s => s.klucz !== "powierzchnie.udzial_puli_komunalnej");
+  $("#suwaki").innerHTML = reszta.map((s) => {
+    const {kroki} = wartoscSuwaka(s);
+    const idx = Math.round((s.wartosc - s.min) / s.krok);
+    const naGranicy = kroki > 0 && idx >= kroki;
+    const znaczniki = s.znaczniki.filter(z2 => z2.wartosc != null && s.max > s.min).map(z2 => {
+      const pct = Math.min(100, Math.max(0, (z2.wartosc - s.min) / (s.max - s.min) * 100));
+      return `<i style="left:${pct}%">${z2.opis}</i>`;
+    }).join("");
+    return `<div class="suwak${naGranicy && s.powod_granicy ? " na-granicy" : ""}" data-klucz="${s.klucz}">
+      <div class="glowa">
+        <label for="s-${s.klucz}">${s.etykieta}
+          ${s.rozwiniecie ? `<button class="pomoc" type="button" aria-label="Wyjaśnienie">?</button>` : ""}
+        </label>
+        <span class="liczba">${wgFormatu(s.format, s.wartosc)}<span class="jedn">${s.jednostka}</span></span>
+      </div>
+      <div class="podpis">${s.podpis}</div>
+      <input type="range" id="s-${s.klucz}" min="0" max="${Math.max(1,kroki)}" step="1" value="${idx}">
+      <div class="znaczniki">${znaczniki}</div>
+      <div class="granica">${s.powod_granicy}</div>
+      ${s.rozwiniecie ? `<div class="rozwiniecie">${s.rozwiniecie}</div>` : ""}
+    </div>`;
   }).join("");
 
-  // Gdy montaż domyka się bazowo, dźwignia mówi o ile przesuwa granicę.
-  // Gdy nie domyka się wcale — przy jakiej wartości zacząłby (rozdz. 7.1).
-  $("#tabela-ranking").tBodies[0].innerHTML = s.ranking.map((r) => `
-    <tr><td>${r.nazwa}</td><td>${proc(r.sila_wplywu)}</td>
-    <td style="text-align:left;font-size:11.5px${r.przelamuje ? ";color:var(--dobrze)" : ""}">
-      ${r.dzwignia}</td></tr>`).join("");
-}
-
-// ---------------------------------------------------------------- parametry
-const SEKCJE = [
-  ["Powierzchnie", ["powierzchnie.pum_laczne", "powierzchnie.liczba_lokali",
-    "powierzchnie.liczba_kondygnacji"]],
-  ["Koszty", ["koszty.koszt_budowy_na_m2", "koszty.infrastruktura", "koszty.projekt_i_nadzor",
-    "koszty.koszty_ogolne", "koszty.rezerwa", "koszty.dzwigi", "koszty.stawka_vat"]],
-  ["Grunt", ["grunt.wartosc"]],
-  ["Pula społeczna", ["pula_spoleczna.kredyt.udzial_docelowy",
-    "pula_spoleczna.kredyt.oprocentowanie", "pula_spoleczna.kredyt.okres_lat",
-    "pula_spoleczna.kredyt.karencja_lat",
-    "pula_spoleczna.partycypacja.stawka_procent_kosztu_lokalu",
-    "pula_spoleczna.partycypacja.rotacja_roczna",
-    "pula_spoleczna.czynsz_zakladany_m2_mies", "pula_spoleczna.czynsz_rynkowy_m2_mies"]],
-  ["Pula komunalna", ["pula_komunalna.czynsz_placony_przez_gmine_m2_mies"]],
-  ["Eksploatacja", ["eksploatacja.koszt_eksploatacji_m2_rok",
-    "eksploatacja.odpis_remontowy_m2_rok", "eksploatacja.ubezpieczenie_rocznie",
-    "eksploatacja.koszty_stale_zarzadu_rocznie", "eksploatacja.pustostany_procent",
-    "eksploatacja.indeksacja_kosztow_rocznie", "eksploatacja.indeksacja_czynszu_rocznie"]],
-  ["Parametry zewnętrzne — sprawdź przed naborem",
-    ["parametry_zewnetrzne.wartosc_odtworzeniowa_m2", "parametry_zewnetrzne.stopa_bazowa_ke",
-     "parametry_zewnetrzne.stopa_referencyjna_ke", "parametry_zewnetrzne.stopa_dyskontowa",
-     "parametry_zewnetrzne.stopa_irs_bgk",
-     "parametry_zewnetrzne.waloryzacja_partycypacji_rocznie",
-     "parametry_zewnetrzne.okres_amortyzacji_budynkow_lat"]],
-  ["Inwestor", ["inwestor.dostepny_wklad_wlasny"]],
-];
-
-function wartoscZeSciezki(obiekt, sciezka) {
-  return sciezka.split(".").reduce((w, k) => (w == null ? null : w[k]), obiekt);
-}
-
-function rysujParametry() {
-  $("#parametry").innerHTML = SEKCJE.map(([tytul, pola]) => `
-    <fieldset><legend>${tytul}</legend><div class="pola">${pola.map((s) => {
-      const v = wartoscZeSciezki(parametry, s);
-      const etykieta = s.split(".").slice(1).join(" · ").replace(/_/g, " ");
-      return `<div class="pole"><label for="p-${s}">${etykieta}</label>
-        <input id="p-${s}" data-sciezka="${s}" type="number" step="any"
-          value="${v == null ? "" : v}"></div>`;
-    }).join("")}</div></fieldset>`).join("");
-
-  $("#parametry").querySelectorAll("input").forEach((el) => {
-    el.addEventListener("input", () => {
-      const s = el.dataset.sciezka;
-      if (el.value === "") { delete zmiany[s]; return; }
-      zmiany[s] = Number(el.value);
+  reszta.forEach((s) => {
+    const wejscie = document.getElementById("s-" + s.klucz);
+    if (!wejscie) return;
+    wejscie.addEventListener("input", () => {
+      const {naWartosc} = wartoscSuwaka(s);
+      zmiany[s.klucz] = Number(naWartosc(Number(wejscie.value)).toFixed(6));
+      przelicz();
+    });
+  });
+  $("#suwaki").querySelectorAll(".pomoc").forEach((b) => {
+    b.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      b.closest(".suwak").classList.toggle("otwarty");
     });
   });
 }
 
-// ---------------------------------------------------------------- sterowanie
-let biegnie = false;
-async function przelicz() {
-  $("#udzial-wartosc").textContent = $("#udzial").value + "%";
-  if (biegnie) return;
-  biegnie = true;
-  try {
-    rysujWerdykty(await api("/api/przelicz", {zmiany: biezaceZmiany()}));
+function rysujPolaLiczbowe(z){
+  $("#pola-liczbowe").innerHTML = z.pola_liczbowe.map(p => `
+    <div class="polex">
+      <label for="p-${p.klucz}">${p.etykieta}<span class="jedn">${p.jednostka}</span></label>
+      <div class="podpis">${p.podpis}</div>
+      <input id="p-${p.klucz}" type="number" step="any" value="${p.wartosc ?? ""}">
+    </div>`).join("");
+  z.pola_liczbowe.forEach((p) => {
+    const w = document.getElementById("p-" + p.klucz);
+    w.addEventListener("change", () => {
+      if (w.value === "") delete zmiany[p.klucz]; else zmiany[p.klucz] = Number(w.value);
+      przelicz();
+    });
+  });
+}
+
+function rysujParametryRynkowe(z){
+  const r = z.parametry_rynkowe;
+  $("#panel-rynkowy-tytul").textContent = r.przeterminowane
+    ? "Parametry rynkowe i wskaźniki — wymagają odświeżenia"
+    : "Parametry rynkowe i wskaźniki — uzupełnione, kliknij żeby sprawdzić";
+  if (r.przeterminowane) $("#panel-rynkowy").open = true;
+  $("#parametry-rynkowe").innerHTML =
+    `<div class="info">Stan na ${r.data}.</div>` + r.pozycje.map(p => `
+      <div class="polex">
+        <label for="r-${p.klucz}">${p.etykieta}</label>
+        <input id="r-${p.klucz}" type="number" step="any" value="${p.wartosc ?? ""}">
+      </div>`).join("");
+  r.pozycje.forEach((p) => {
+    const w = document.getElementById("r-" + p.klucz);
+    w.addEventListener("change", () => {
+      if (w.value === "") delete zmiany[p.klucz]; else zmiany[p.klucz] = Number(w.value);
+      przelicz();
+    });
+  });
+}
+
+/* Ściąganie czynszu do limitu — jedyne miejsce, gdzie narzędzie zmienia
+   wartość za użytkownika, więc musi to zakomunikować (rozdz. 3.4).
+
+   Dzieje się PRZED wysłaniem żądania. Silnik odrzuca czynsz ponad limit twardym
+   błędem, i słusznie — nie liczy scenariusza bezprawnego. Ale użytkownik nigdy
+   nie ma go zobaczyć: ograniczenie jest wbudowane w suwak, nie zgłaszane jako
+   błąd (rozdz. 3.1). Dlatego ściągamy wartość zawczasu, na ostatnio znanych
+   limitach. */
+const KLUCZE_CZYNSZU = [
+  "pula_spoleczna.czynsz_zakladany_m2_mies",
+  "pula_komunalna.czynsz_placony_przez_gmine_m2_mies",
+];
+let komunikatSciagniecia = null;
+
+function przyjmijSciagniecie(w){
+  // Serwer zna limit dla tej konfiguracji, zanim cokolwiek policzy, i sam
+  // sciaga stawke. Tu tylko przenosimy wynik do stanu suwakow i mowimy o tym.
+  if (!w.sciagniete || !w.sciagniete.length) return;
+  KLUCZE_CZYNSZU.forEach((klucz) => {
+    const s = w.zakresy.suwaki.find(x => x.klucz === klucz);
+    if (s) zmiany[klucz] = s.wartosc;
+  });
+  komunikatSciagniecia = w.sciagniete.join(" ");
+}
+
+/* ================= przeliczenie ================= */
+function biezaceZmiany(){
+  const kopia = Object.assign({}, zmiany);
+  kopia["powierzchnie.udzial_puli_komunalnej"] = Number($("#pokretlo").value) / 100;
+  return kopia;
+}
+
+async function przelicz(){
+  $("#pokretlo-wart").textContent = proc(Number($("#pokretlo").value) / 100);
+  if (liczenie){ ponow = true; return; }
+  liczenie = true;
+  try{
+    const w = await api("/api/przelicz", {zmiany: biezaceZmiany()});
+    zakresy = w.zakresy;
+    przyjmijSciagniecie(w);
+    rysujWerdykty(w);
+    rysujKomunikaty(w);
+    rysujKaskade(w.wykresy.kaskada);
+    rysujCzynsz(w.wykresy.czynsz_poziomy);
+    rysujGauge(w.wykresy.rekompensata_zapas);
+    rysujPrzeplywy(w.wykresy.przeplywy);
+    rysujSuwaki(zakresy);
+    $("#tryb-opis").textContent = zakresy.kredyt_dostepny
+      ? ($("#tryb-reczny").checked
+          ? "Kredyt ustawiasz sam. Wskaźnik pokrycia może wyjść poniżej jedności."
+          : "Kredyt liczony automatycznie: największy, jaki uniesie ustawiony czynsz.")
+      : "Przy samych mieszkaniach komunalnych kredyt nie przysługuje, więc nie ma czym sterować.";
+    if (sweep) rysujNegocjacje(sweep, Number($("#pokretlo").value) / 100);
     pokazBlad("");
-    if (sweepWTle) { rysujSweep(sweepWTle); }
-  } catch (e) {
+    if (komunikatSciagniecia){
+      pokazSciagniecie(komunikatSciagniecia);
+      komunikatSciagniecia = null;
+    }
+
+  }catch(e){
     pokazBlad(e.message);
-    $("#zbiorczy").className = "zbiorczy nie";
-    $("#zbiorczy").textContent = "Wariant niepoliczalny — patrz komunikat powyżej.";
-    $("#werdykty").innerHTML = [1, 2, 3].map((n) =>
-      `<div class="werdykt nieznany"><h3>Test ${n}</h3>
-       <div class="status">nie policzono</div></div>`).join("");
-  } finally {
-    biegnie = false;
+  }finally{
+    liczenie = false;
+    if (ponow){ ponow = false; przelicz(); }
   }
 }
 
-async function odswiezSweep() {
-  try {
-    sweepWTle = await api("/api/sweep", {zmiany: Object.assign({}, zmiany)});
-    rysujSweep(sweepWTle);
-  } catch (e) {
-    $("#sweep-podsumowanie").textContent = "Sweepu nie policzono: " + e.message;
+async function odswiezSweep(){
+  try{
+    sweep = await api("/api/sweep", {zmiany: Object.assign({}, zmiany)});
+    rysujNegocjacje(sweep, Number($("#pokretlo").value) / 100);
+  }catch(e){
+    $("#p-negocjacja").textContent = "Krzywej nie policzono: " + e.message;
   }
 }
 
-$("#udzial").addEventListener("input", przelicz);       // bez przeladowania strony
-$("#btn-zastosuj").addEventListener("click", async () => {
-  await przelicz();
-  await odswiezSweep();
-});
-function pobierz(nazwa, dane, typ) {
-  // Blob + tymczasowy odnosnik — dziala tak samo lokalnie i na wdrozeniu,
-  // gdzie system plikow serwera jest tylko do odczytu.
+/* ================= zapis ================= */
+function pobierz(nazwa, dane, typ){
   const url = URL.createObjectURL(new Blob([dane], {type: typ}));
   const a = document.createElement("a");
-  a.href = url;
-  a.download = nazwa;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
+  a.href = url; a.download = nazwa;
+  document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
-
-function base64NaBajty(b64) {
-  const surowe = atob(b64);
-  const bajty = new Uint8Array(surowe.length);
-  for (let i = 0; i < surowe.length; i++) bajty[i] = surowe.charCodeAt(i);
-  return bajty;
+function base64NaBajty(b64){
+  const s = atob(b64), b = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) b[i] = s.charCodeAt(i);
+  return b;
 }
 
+/* ================= zdarzenia ================= */
+$("#pokretlo").addEventListener("input", () => { przelicz(); });
+$("#pokretlo").addEventListener("change", () => { odswiezSweep(); });
+$("#tryb-reczny").addEventListener("change", (ev) => {
+  zmiany["przelaczniki.tryb_kredytu"] = ev.target.checked ? "reczny" : "automatyczny";
+  przelicz().then(odswiezSweep);
+});
 $("#btn-arkusz").addEventListener("click", async (ev) => {
-  const btn = ev.currentTarget;
-  const etykieta = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = "Generowanie…";
-  const kom = $("#komunikat");
-  kom.hidden = true;
-  try {
+  const b = ev.currentTarget, etykieta = b.textContent;
+  b.disabled = true; b.textContent = "Generowanie…";
+  try{
     const odp = await api("/api/arkusz", {zmiany: biezaceZmiany()});
-    // Arkusz i uzyty zestaw parametrow — zeby dalo sie odtworzyc, na czym liczono.
     pobierz(odp.nazwa + ".xlsx", base64NaBajty(odp.arkusz_base64),
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     pobierz(odp.nazwa + ".yaml", odp.parametry_yaml, "text/yaml;charset=utf-8");
-    kom.textContent = odp.komunikat;
-    kom.hidden = false;
+    $("#komunikat-zapisu").textContent =
+      "Pobrano arkusz oraz zestaw założeń, na których liczono.";
     pokazBlad("");
-  } catch (e) {
-    pokazBlad(e.message);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = etykieta;
-  }
+  }catch(e){ pokazBlad(e.message); }
+  finally{ b.disabled = false; b.textContent = etykieta; }
 });
 
-(async function start() {
-  try {
-    parametry = (await api("/api/parametry")).parametry;
-    const u = parametry.powierzchnie.udzial_puli_komunalnej;
-    $("#udzial").value = Math.round(u * 100 / 5) * 5;
-    rysujParametry();
+(async function start(){
+  try{
+    const w = await api("/api/przelicz", {zmiany: {}});
+    zakresy = w.zakresy;
+    const pokretlo = zakresy.suwaki.find(s => s.klucz === "powierzchnie.udzial_puli_komunalnej");
+    $("#pokretlo").value = Math.round(pokretlo.wartosc * 100);
+    rysujPolaLiczbowe(zakresy);
+    rysujParametryRynkowe(zakresy);
     await przelicz();
     await odswiezSweep();
-  } catch (e) {
-    pokazBlad(e.message);
-  }
+  }catch(e){ pokazBlad(e.message); }
 })();
 </script>
 </body>

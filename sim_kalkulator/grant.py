@@ -94,8 +94,8 @@ def _grant_spoleczny(w: Wejscie, pula: PulaKosztow, ostrzezenia: List[Ostrzezeni
                 podstawa="art. 13 ust. 1 pkt 1 w zw. z art. 13 ust. 4 ustawy z 8.12.2006",
             
                 tresc_potoczna=(
-                    "Dodatkowe 5% dotacji naliczono przy zalozeniu, ze nie podnosi ono progu "
-                    "gruntowego. Odczyt alternatywny dalby wyzsza dotacje — do potwierdzenia w Banku."
+                    "Dodatkowe 5% dotacji naliczono przy założeniu, że nie podnosi ono progu "
+                    "gruntowego. Odczyt alternatywny dałby wyższą dotację — do potwierdzenia w Banku."
                 ),
                 waga=Waga.ZMIENIA_KWOTE,
             )
@@ -180,8 +180,8 @@ def build(w: Wejscie, a: Alokacja) -> Granty:
                     podstawa="art. 13 ust. 1a ustawy z 8.12.2006",
                 
                 tresc_potoczna=(
-                    "Laczna dotacja zostala sciagnieta do 45% kosztow, bo obie pule potraktowano "
-                    "jako jedna inwestycje. Przy odczycie przeciwnym dotacja bylaby istotnie wyzsza."
+                    "Łączna dotacja została ściągnięta do 45% kosztów, bo obie pule potraktowano "
+                    "jako jedną inwestycję. Przy odczycie przeciwnym dotacja byłaby istotnie wyższa."
                 ),
                 waga=Waga.ZMIENIA_WERDYKT,
             )
@@ -201,8 +201,8 @@ def build(w: Wejscie, a: Alokacja) -> Granty:
                 podstawa="art. 13 ust. 1 pkt 1 ustawy z 8.12.2006",
             
                 tresc_potoczna=(
-                    "Dotacja wyszla nizsza niz 45%, bo czesc powyzej 35% jest ograniczona wartoscia "
-                    "Twojego gruntu. Drozszy grunt oznacza wyzsza dotacje."
+                    "Dotacja wyszła niższa niż 45%, bo część powyżej 35% jest ograniczona wartością "
+                    "Twojego gruntu. Droższy grunt oznacza wyższą dotację."
                 ),
                 waga=Waga.ZMIENIA_KWOTE,
             )

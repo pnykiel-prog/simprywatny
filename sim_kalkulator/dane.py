@@ -652,8 +652,8 @@ def _waliduj_powierzchnie(w: Wejscie, ostrzezenia: List[Ostrzezenie]) -> None:
                 podstawa="rozp. MIiR z 4.03.2019, Dz.U. 2019 poz. 457",
             
                 tresc_potoczna=(
-                    f"Srednie mieszkanie wychodzi {srednie:.0f} m2. Przy dotacji z Funduszu Doplat "
-                    "mieszkania moga miec od 25 do 80 m2 — wieksze tylko dla rodzin wielodzietnych."
+                    f"Średnie mieszkanie wychodzi {srednie:.0f} m². Przy dotacji z Funduszu Dopłat "
+                    "mieszkania mogą mieć od 25 do 80 m² — większe tylko dla rodzin wielodzietnych."
                 ),
                 waga=Waga.ZMIENIA_WERDYKT,
             )
@@ -670,8 +670,8 @@ def _waliduj_powierzchnie(w: Wejscie, ostrzezenia: List[Ostrzezenie]) -> None:
                 podstawa="rozp. MIiR z 4.03.2019, Dz.U. 2019 poz. 457",
             
                 tresc_potoczna=(
-                    "Budynek ma tyle kondygnacji, ze winda jest obowiazkowa, a w kosztach jej nie ma. "
-                    "Koszt inwestycji jest zanizony — dopisz te pozycje."
+                    "Budynek ma tyle kondygnacji, że winda jest obowiązkowa, a w kosztach jej nie ma. "
+                    "Koszt inwestycji jest zaniżony — dopisz tę pozycję."
                 ),
                 waga=Waga.ZMIENIA_KWOTE,
             )
@@ -680,6 +680,11 @@ def _waliduj_powierzchnie(w: Wejscie, ostrzezenia: List[Ostrzezenie]) -> None:
 
 def _waliduj_kredyt(w: Wejscie) -> None:
     k = w.pula_spoleczna.kredyt
+    # W trybie automatycznym udzial docelowy nie jest uzywany — kwote kredytu
+    # wyznacza czynsz, a przy samych mieszkaniach komunalnych wychodzi zero.
+    # Zakaz z art. 5a ust. 3 nie ma wtedy czego naruszyc, wiec sterowanie
+    # kredytem po prostu znika, zamiast zglaszac blad (rozdz. 5.1 uzupelnienia).
+    tryb_reczny = w.przelaczniki.tryb_kredytu is TrybKredytu.RECZNY
     if k.udzial_docelowy < 0:
         raise BladWalidacji("'pula_spoleczna.kredyt.udzial_docelowy' nie moze byc ujemny.")
     if k.udzial_docelowy > prawo.KREDYT_MAKSYMALNY_UDZIAL:
@@ -692,7 +697,7 @@ def _waliduj_kredyt(w: Wejscie) -> None:
         raise BladWalidacji("'pula_spoleczna.kredyt.karencja_lat' nie moze byc ujemna.")
     if k.oprocentowanie < 0:
         raise BladWalidacji("'pula_spoleczna.kredyt.oprocentowanie' nie moze byc ujemne.")
-    if not k.aktywny:
+    if tryb_reczny and not k.aktywny:
         return
     if k.okres_lat <= 0:
         raise BladWalidacji("Kredyt aktywny wymaga dodatniego 'okres_lat'.")
@@ -708,7 +713,7 @@ def _waliduj_kredyt(w: Wejscie) -> None:
             f"({k.okres_lat} lat) — okres liczy sie lacznie z karencja."
         )
     # art. 5a ust. 3 — kredyt istnieje tylko wtedy, gdy istnieje pula spoleczna.
-    if w.powierzchnie.udzial_puli_komunalnej >= 1:
+    if tryb_reczny and w.powierzchnie.udzial_puli_komunalnej >= 1:
         raise BladWalidacji(
             "Kredyt SBC ustawiony przy udziale puli komunalnej rownym 100%. "
             "Przedsiewziecie z art. 5a ust. 1 ustawy z 8.12.2006 nie moze byc finansowane "
@@ -755,8 +760,8 @@ def _waliduj_partycypacje(w: Wejscie, ostrzezenia: List[Ostrzezenie]) -> None:
                 podstawa="art. 29a ust. 2a i 2b, art. 7b ust. 1 ustawy z 26.10.1995",
             
                 tresc_potoczna=(
-                    "Przy tym poziomie partycypacji przepisy nie sa jednoznaczne co do rodzaju umowy "
-                    "najmu. Warto to uzgodnic z prawnikiem albo wybrac poziom powyzej 15%."
+                    "Przy tym poziomie partycypacji przepisy nie są jednoznaczne co do rodzaju umowy "
+                    "najmu. Warto to uzgodnić z prawnikiem albo wybrać poziom powyżej 15%."
                 ),
                 waga=Waga.POZOSTALE,
             )
@@ -839,8 +844,8 @@ def _waliduj_parametry(
                 podstawa="wymog metodyczny, rozdz. 4.4 specyfikacji",
             
                 tresc_potoczna=(
-                    "Wskazniki rynkowe pochodza sprzed ponad pol roku. Wynik bedzie orientacyjny, "
-                    "dopoki ich nie odswiezysz."
+                    "Wskaźniki rynkowe pochodzą sprzed ponad pół roku. Wynik będzie orientacyjny, "
+                    "dopóki ich nie odświeżysz."
                 ),
                 waga=Waga.ZMIENIA_KWOTE,
             )
@@ -871,8 +876,8 @@ def _waliduj_parametry(
                 podstawa="wymog metodyczny, rozdz. 4.4 specyfikacji",
             
                 tresc_potoczna=(
-                    "Czesc wskaznikow rynkowych nie ma podanego zrodla. Bez tego nie da sie pozniej "
-                    "odtworzyc, na czym liczono."
+                    "Część wskaźników rynkowych nie ma podanego źródła. Bez tego nie da się później "
+                    "odtworzyć, na czym liczono."
                 ),
                 waga=Waga.POZOSTALE,
             )
@@ -900,9 +905,9 @@ def _waliduj_przelaczniki(w: Wejscie, ostrzezenia: List[Ostrzezenie]) -> None:
                 podstawa="art. 13 ust. 1a w zw. z art. 5a ust. 1 i 3 ustawy z 8.12.2006",
             
                 tresc_potoczna=(
-                    "Czesc mieszkan idzie do gminy, czesc na wynajem spoleczny. Przyjeto, ze sa to dwie "
-                    "odrebne inwestycje z osobnymi wnioskami. To zalozenie — potwierdz je w Banku, "
-                    "bo zmienia wysokosc dotacji."
+                    "Część mieszkań idzie do gminy, część na wynajem społeczny. Przyjęto, że są to dwie "
+                    "odrębne inwestycje z osobnymi wnioskami. To założenie — potwierdź je w Banku, "
+                    "bo zmienia wysokość dotacji."
                 ),
                 waga=Waga.ZMIENIA_KWOTE,
             )
@@ -925,8 +930,8 @@ def _waliduj_przelaczniki(w: Wejscie, ostrzezenia: List[Ostrzezenie]) -> None:
                 podstawa="art. 13 ust. 1 pkt 1 oraz art. 5 ust. 9 pkt 4 ustawy z 8.12.2006",
             
                 tresc_potoczna=(
-                    "Grunt wniesiony przez gmine zmniejsza dopuszczalna dotacje. Grunt kupiony albo "
-                    "wlasny dziala odwrotnie — warto porownac oba warianty."
+                    "Grunt wniesiony przez gminę zmniejsza dopuszczalną dotację. Grunt kupiony albo "
+                    "własny działa odwrotnie — warto porównać oba warianty."
                 ),
                 waga=Waga.ZMIENIA_KWOTE,
             )
@@ -956,8 +961,8 @@ def _waliduj_przelaczniki(w: Wejscie, ostrzezenia: List[Ostrzezenie]) -> None:
                 podstawa="zalozenie modelowe, nie przepis",
             
                 tresc_potoczna=(
-                    "Przyjeto, ze pustostany obciazaja tylko mieszkania spoleczne, bo najemca calej "
-                    "puli komunalnej jest gmina. Sprawdz, co mowi projekt umowy z gmina."
+                    "Przyjęto, że pustostany obciążają tylko mieszkania społeczne, bo najemcą całej "
+                    "puli komunalnej jest gmina. Sprawdź, co mówi projekt umowy z gminą."
                 ),
                 waga=Waga.POZOSTALE,
             )
@@ -975,8 +980,8 @@ def _waliduj_przelaczniki(w: Wejscie, ostrzezenia: List[Ostrzezenie]) -> None:
             podstawa="art. 5 ust. 7-8 ustawy z 8.12.2006 — katalog nieprzytoczony w specyfikacji",
         
                 tresc_potoczna=(
-                    "Sposob rozliczenia nakladu inwestycyjnego przesadza o tym, ile dotacji wolno "
-                    "przyjac. To zalozenie do potwierdzenia w Banku — potrafi odwrocic wynik."
+                    "Sposób rozliczenia nakładu inwestycyjnego przesądza o tym, ile dotacji wolno "
+                    "przyjąć. To założenie do potwierdzenia w Banku — potrafi odwrócić wynik."
                 ),
                 waga=Waga.ZMIENIA_WERDYKT,
             )
@@ -993,8 +998,8 @@ def _waliduj_przelaczniki(w: Wejscie, ostrzezenia: List[Ostrzezenie]) -> None:
             podstawa="§ 6 ust. 5 rozp. Dz.U. 2025 poz. 1897; § 12 ust. 10 rozp. Dz.U. 2021 poz. 766",
         
                 tresc_potoczna=(
-                    "Godziwy zysk inwestora liczony jest metoda przyjeta zalozeniowo — przepisy "
-                    "wskazuja zrodlo stopy, ale nie podaja wzoru. Do potwierdzenia w Banku."
+                    "Godziwy zysk inwestora liczony jest metodą przyjętą założeniowo — przepisy "
+                    "wskazują źródło stopy, ale nie podają wzoru. Do potwierdzenia w Banku."
                 ),
                 waga=Waga.POZOSTALE,
             )

@@ -53,9 +53,20 @@ class TestKredytWPuliKomunalnej:
         with pytest.raises(BladWalidacji, match="niedopuszczalna"):
             zbuduj(dane, na_dzien=wspolne.DATA_ODNIESIENIA)
 
-    def test_kredyt_przy_stu_procentach_puli_komunalnej_to_wyjatek(self):
+    def test_kredyt_reczny_przy_stu_procentach_puli_komunalnej_to_wyjatek(self):
+        # W trybie recznym kwota kredytu pochodzi z udzialu docelowego, wiec
+        # przy samych mieszkaniach komunalnych naprawde bylby to kredyt w puli,
+        # ktorej przepisy go zabraniaja.
+        dane = wspolne.zmien(powierzchnie__udzial_puli_komunalnej=1.0)
+        dane["przelaczniki"]["tryb_kredytu"] = "reczny"
         with pytest.raises(BladWalidacji, match="art. 5a ust. 3"):
-            wspolne.wejscie(powierzchnie__udzial_puli_komunalnej=1.0)
+            zbuduj(dane, na_dzien=wspolne.DATA_ODNIESIENIA)
+
+    def test_tryb_automatyczny_przy_stu_procentach_po_prostu_nie_ma_kredytu(self):
+        # Sterowanie kredytem znika, zamiast zglaszac blad — kwote wyznacza
+        # czynsz, a bez mieszkan spolecznych wychodzi zero.
+        w = wspolne.wejscie(powierzchnie__udzial_puli_komunalnej=1.0)
+        assert w.powierzchnie.udzial_puli_komunalnej == Decimal("1.0")
 
     def test_pula_calkowicie_komunalna_bez_kredytu_jest_poprawna(self):
         w = wspolne.wejscie(

@@ -53,11 +53,13 @@ class TestStronaGlowna:
         import re
 
         tresc = (Path(serwer.WEB) / "index.html").read_text(encoding="utf-8")
-        # Data-URI wycinamy przed sprawdzeniem: identyfikator przestrzeni nazw
-        # SVG wyglada jak adres, ale niczego nie pobiera.
-        bez_data_uri = re.sub(r'href="data:[^"]*"', 'href="data:"', tresc)
+        # Przed sprawdzeniem wycinamy dwie rzeczy, ktore wygladaja jak adres,
+        # a niczego nie pobieraja: data-URI oraz identyfikator przestrzeni nazw
+        # SVG, ktory jest wymagany przez createElementNS.
+        oczyszczone = re.sub(r'href="data:[^"]*"', 'href="data:"', tresc)
+        oczyszczone = oczyszczone.replace("http://www.w3.org/2000/svg", "<svg-ns>")
         for wzorzec in ("http://", "https://", "cdn.", "<script src", '<link rel="stylesheet"'):
-            assert wzorzec not in bez_data_uri, f"UI siega po zasob zewnetrzny: {wzorzec}"
+            assert wzorzec not in oczyszczone, f"UI siega po zasob zewnetrzny: {wzorzec}"
 
     def test_ui_nie_pobiera_niczego_z_obcego_zrodla(self, adres):
         import re
@@ -78,8 +80,8 @@ class TestStronaGlowna:
 
     def test_ui_niesie_zastrzezenia_z_rozdzialu_13(self, adres):
         tresc = (Path(serwer.WEB) / "index.html").read_text(encoding="utf-8")
-        assert "Nie zastępuje wyliczenia BGK" in tresc
-        assert "Kwestie otwarte" in tresc
+        assert "Nie zastępuje wyliczenia Banku" in tresc
+        assert "niepotwierdzona" in tresc
         assert "Wiążące jest wyliczenie Banku" in tresc
 
 
@@ -142,18 +144,37 @@ class TestPrzelicz:
 
 
 class TestBledy:
-    def test_kredyt_przy_pelnej_puli_komunalnej_to_blad_walidacji(self, adres):
-        kod, dane = wolaj(adres, "/api/przelicz",
-                          {"zmiany": {"powierzchnie.udzial_puli_komunalnej": 1.0}})
+    def test_kredyt_reczny_przy_pelnej_puli_komunalnej_to_blad_walidacji(self, adres):
+        kod, dane = wolaj(adres, "/api/przelicz", {"zmiany": {
+            "przelaczniki.tryb_kredytu": "reczny",
+            "powierzchnie.udzial_puli_komunalnej": 1.0,
+        }})
         assert kod == 400 and dane["ok"] is False
         assert dane["typ"] == "walidacja"
         assert "art. 5a ust. 3" in dane["powod"]
 
-    def test_czynsz_ponad_limit_to_blad_a_nie_porazka_testu(self, adres):
+    def test_czynsz_ponad_limit_jest_sciagany_a_nie_zglaszany_jako_blad(self, adres):
+        # Ograniczenie ustawowe jest wbudowane w sterowanie: stawka ponad limit
+        # zostaje sciagnieta i zakomunikowana, zamiast wracac jako blad.
         kod, dane = wolaj(adres, "/api/przelicz",
                           {"zmiany": {"pula_spoleczna.czynsz_zakladany_m2_mies": 99.0}})
-        assert kod == 400
-        assert "przekracza limit wiazacy" in dane["powod"]
+        assert kod == 200 and dane["ok"] is True
+        assert dane["sciagniete"], "sciagniecie stawki nie zostalo zakomunikowane"
+        assert "obniżony" in dane["sciagniete"][0]
+        pula = next(p for p in dane["pule"] if p["nazwa"] == "spoleczna")
+        assert pula["czynsz"] <= pula["limit_czynszu"]
+
+    def test_silnik_nadal_odmawia_liczenia_stawki_ponad_limit(self):
+        # Sciaganie dzieje sie w warstwie API. Sam silnik ma pozostac twardy —
+        # nie liczy scenariusza bezprawnego, kto by go nie podal.
+        from sim_kalkulator import alokacja, czynsz, grant
+        from sim_kalkulator.dane import BladWalidacji as BW, wczytaj_yaml
+
+        w = wczytaj_yaml(DOMYKAJACY)
+        a = alokacja.build(w)
+        g = grant.build(w, a)
+        with pytest.raises(BW, match="przekracza limit wiazacy"):
+            czynsz.build(w, a.spoleczna, g.spoleczna, D("99"), True)
 
     def test_nieznany_parametr_jest_odrzucany(self, adres):
         kod, dane = wolaj(adres, "/api/przelicz", {"zmiany": {"koszty.wymyslony": 1}})
@@ -187,14 +208,21 @@ class TestSweep:
         kod, dane = wolaj(adres, "/api/sweep", {"zmiany": {}})
         assert kod == 200
         assert len(dane["punkty"]) == 21
-        assert dane["maksymalny_udzial"] == pytest.approx(0.80)
-        assert dane["punkt_graniczny"] == pytest.approx(0.85)
+        assert dane["maksymalny_udzial"] == pytest.approx(0.75)
+        assert dane["punkt_graniczny"] == pytest.approx(0.80)
 
     def test_punkty_niepoliczalne_niosa_powod(self, adres):
-        _, dane = wolaj(adres, "/api/sweep", {"zmiany": {}})
+        # W trybie automatycznym caly zakres jest policzalny; niepoliczalne
+        # punkty pojawiaja sie dopiero, gdy kredyt ustawia sie recznie.
+        _, dane = wolaj(adres, "/api/sweep",
+                        {"zmiany": {"przelaczniki.tryb_kredytu": "reczny"}})
         niepoliczalne = [p for p in dane["punkty"] if not p["policzalny"]]
         assert niepoliczalne
         assert all(p["powod"] for p in niepoliczalne)
+
+    def test_tryb_automatyczny_liczy_caly_zakres(self, adres):
+        _, dane = wolaj(adres, "/api/sweep", {"zmiany": {}})
+        assert all(p["policzalny"] for p in dane["punkty"])
 
     def test_ranking_obejmuje_stope_referencyjna(self, adres):
         _, dane = wolaj(adres, "/api/sweep", {"zmiany": {}})

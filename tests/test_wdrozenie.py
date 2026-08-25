@@ -351,14 +351,14 @@ class TestFunkcjeOdpowiadaja:
         srv, adres = uruchom(zaladuj("przelicz").handler)
         try:
             kod, tresc = wolaj(
-                adres, {"zmiany": {"powierzchnie.udzial_puli_komunalnej": 1.0}}
+                adres, {"zmiany": {"powierzchnie.udzial_puli_komunalnej": 1.4}}
             )
         finally:
             srv.shutdown()
             srv.server_close()
         dane = json.loads(tresc)
         assert kod == 400 and dane["ok"] is False
-        assert "art. 5a ust. 3" in dane["powod"]
+        assert "0.0-1.0" in dane["powod"]
 
     def test_niepoprawne_cialo_zadania_nie_wywala_funkcji(self):
         srv, adres = uruchom(zaladuj("przelicz").handler)

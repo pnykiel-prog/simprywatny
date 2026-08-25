@@ -81,6 +81,10 @@ inwestor:
   dostepny_wklad_wlasny: 6000000.0
 
 przelaczniki:
+  # automatyczny — silnik liczy najwiekszy kredyt, ktory uniesie zakladany czynsz,
+  #   przez co wskaznik pokrycia wychodzi 1,0, a wynikiem jest wymagany wklad wlasny;
+  # reczny — kwote wyznacza kredyt.udzial_docelowy, a pokrycie wraca do roli miary.
+  tryb_kredytu: automatyczny
   # Kwestie otwarte rozdz. 10 — wartosci domyslne sa ZALOZENIAMI, nie rozstrzygnieciami.
   hybryda_jako_jedno_przedsiewziecie: false
   grunt_jst_liczy_sie_do_limitu_grantu: true

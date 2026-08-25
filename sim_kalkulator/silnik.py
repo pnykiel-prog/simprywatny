@@ -6,7 +6,7 @@ indziej: dwa silniki liczace to samo rozjada sie i nikt tego nie zauwazy.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from typing import Optional, Tuple
 
@@ -52,7 +52,11 @@ def kredyt_maksymalny_obslugiwalny(
     kosztow biezacych i dalby pokrycie ponizej jednosci, czyli dokladnie
     odwrotnie niz zapowiada rozdzial 2.2.
 
-    Gorne ograniczenie: art. 15b ust. 2 ustawy z 26.10.1995.
+    Kwota jest ograniczona z dwoch stron. Od gory ustawowym udzialem 80%
+    (art. 15b ust. 2 ustawy z 26.10.1995) oraz tym, ile kredytu w ogole
+    potrzeba: dotacja i partycypacja pokrywaja czesc kosztow, a nikt nie
+    zaciaga kredytu wiekszego niz brakujaca reszta. Bez tego drugiego
+    ograniczenia wymagany wklad wlasny wychodzilby ujemny.
     """
     if not a.spoleczna.aktywna:
         return ZERO
@@ -90,7 +94,72 @@ def kredyt_maksymalny_obslugiwalny(
     if not pulapy:
         return ZERO
     limit_ustawowy = a.spoleczna.koszty_przedsiewziecia * prawo.KREDYT_MAKSYMALNY_UDZIAL
-    return pelne_zlote_w_dol(max(ZERO, min(min(pulapy), limit_ustawowy)))
+    # Ile kredytu faktycznie potrzeba po dotacji i partycypacji.
+    partycypacja = (
+        a.spoleczna.koszty_przedsiewziecia
+        * w.pula_spoleczna.partycypacja.stawka_procent_kosztu_lokalu
+    )
+    potrzebny = a.spoleczna.koszty_przedsiewziecia - g.spoleczna.kwota - partycypacja
+    return pelne_zlote_w_dol(
+        max(ZERO, min(min(pulapy), limit_ustawowy, potrzebny))
+    )
+
+
+def czynsz_domykajacy_bez_wkladu(
+    w: Wejscie, a: Alokacja, g: Granty,
+    limity_s: LimityCzynszu, limity_k: LimityCzynszu,
+    kredyt_potrzebny: Decimal,
+) -> Optional[Decimal]:
+    """Stawka czynszu, przy ktorej kredyt uniesie caly brakujacy kapital.
+
+    Odpowiada na pytanie z rozdz. 4.3 uzupelnienia: ile musialby wynosic czynsz,
+    zeby inwestycja splacala sie sama, bez wkladu wlasnego. Rozjazd miedzy ta
+    stawka a limitem ustawowym jest centralnym napieciem calego modelu.
+
+    Rachunek jest odwroceniem wyliczenia maksymalnego kredytu. Przychod jest
+    wprost proporcjonalny do stawki, a koszty biezace od niej nie zaleza, wiec
+    warunek pokrycia w kazdym roku daje minimalna stawke dla tego roku;
+    wiazaca jest najwieksza z nich.
+
+    Zwraca None, gdy zadna stawka nie wystarczy — na przyklad gdy potrzebny
+    kredyt przekracza ustawowe 80% kosztow.
+    """
+    if not a.spoleczna.aktywna or kredyt_potrzebny <= ZERO:
+        return ZERO
+    k = w.pula_spoleczna.kredyt
+    okresy_splaty = k.okres_lat - k.karencja_lat
+    if k.okres_lat <= 0 or okresy_splaty <= 0:
+        return None
+    if kredyt_potrzebny > a.spoleczna.koszty_przedsiewziecia * prawo.KREDYT_MAKSYMALNY_UDZIAL:
+        return None
+
+    # Projekcja przy stawce jednostkowej — przychod kazdego roku jest wprost
+    # proporcjonalny do stawki, wiec wystarczy raz odczytac wspolczynnik.
+    jednostkowe = replace(
+        w, pula_spoleczna=replace(w.pula_spoleczna, czynsz_zakladany_m2_mies=JEDEN)
+    )
+    fin = _projekcja.zbuduj_finansowanie(jednostkowe, a, g, kwota_kredytu=ZERO)
+    proj = _projekcja.build(jednostkowe, a, fin, limity_s, limity_k)
+
+    if k.oprocentowanie == ZERO:
+        annuita_jednostkowa = JEDEN / Decimal(okresy_splaty)
+    else:
+        czynnik = (JEDEN + k.oprocentowanie) ** okresy_splaty
+        annuita_jednostkowa = k.oprocentowanie * czynnik / (czynnik - JEDEN)
+
+    stawki = []
+    for rok in proj.spoleczna.lata:
+        if rok.rok > k.okres_lat:
+            continue
+        przychod_na_zlotowke = rok.przychod_czynszowy_netto
+        if przychod_na_zlotowke <= ZERO:
+            return None
+        wspolczynnik = (
+            k.oprocentowanie if rok.rok <= k.karencja_lat else annuita_jednostkowa
+        )
+        potrzebny_przychod = rok.koszty_operacyjne + kredyt_potrzebny * wspolczynnik
+        stawki.append(potrzebny_przychod / przychod_na_zlotowke)
+    return max(stawki) if stawki else None
 
 
 @dataclass(frozen=True)
@@ -138,6 +207,19 @@ class Wynik:
     def wklad_wlasny_na_m2(self) -> Decimal:
         return na_m2(
             self.finansowanie.wklad_wlasny_wymagany, self.wejscie.powierzchnie.pum_laczne
+        )
+
+    @property
+    def czynsz_domykajacy_m2_mies(self) -> Optional[Decimal]:
+        """Czynsz, przy ktorym inwestycja splacalaby sie sama — rozdz. 4.3."""
+        potrzebny = (
+            self.alokacja.spoleczna.koszty_przedsiewziecia
+            - self.finansowanie.spoleczna.grant
+            - self.finansowanie.spoleczna.partycypacja
+        )
+        return czynsz_domykajacy_bez_wkladu(
+            self.wejscie, self.alokacja, self.granty,
+            self.limity_spoleczna, self.limity_komunalna, potrzebny,
         )
 
     @property

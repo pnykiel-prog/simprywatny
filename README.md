@@ -157,19 +157,52 @@ w limitach czasu funkcji z dużym zapasem.
 
 ---
 
+## Główne pytanie: ile kapitału trzeba dołożyć
+
+Narzędzie nie pyta „mam tyle kapitału, czy się spina", tylko odpowiada **„ile
+kapitału muszę dołożyć, żeby się spięło"**. Wkład własny jest domknięciem
+montażu, więc liczy się go jako resztę:
+
+```
+wkład własny = koszty przedsięwzięcia − dotacja − kredyt − partycypacja
+```
+
+To jest **główna liczba wyjściowa**. Zadeklarowany kapitał inwestora jest
+opcjonalnym punktem odniesienia i nigdy nie blokuje obliczenia.
+
+### Kredyt liczony, nie wpisywany
+
+Domyślnie silnik wyznacza **największy kredyt, który uniesie zakładany czynsz**,
+ograniczony trzema rzeczami: zdolnością czynszu w każdym roku projekcji,
+ustawowym udziałem 80% oraz tym, ile kredytu w ogóle potrzeba po dotacji
+i partycypacji. Dzięki temu wskaźnik pokrycia obsługi długu nigdy nie schodzi
+poniżej 1,0, a całe napięcie montażu przenosi się do jednej liczby.
+
+Przełącznik „ustal kredyt samodzielnie" wraca do trybu ręcznego — tam wskaźnik
+pokrycia znów bywa mniejszy od jedności i test 2 może oblać.
+
 ## Trzy testy
 
 | Test | Warunek | Wynik przy porażce |
 |---|---|---|
-| **1. Montaż** | `grant + kredyt + partycypacja + wkład własny = koszty` przy wkładzie ≤ dostępny | luka kapitałowa w zł |
-| **2. Zdolność czynszowa** | `przychód netto ≥ eksploatacja + odpis + rata`, DSCR ≥ 1,0 w **każdym** roku | luka czynszowa w zł/m²/mies. + rok pierwszego naruszenia |
+| **1. Kapitał** | wymagany wkład ≤ zadeklarowany kapitał (gdy podany) | brakujący kapitał w zł |
+| **2. Zdolność czynszowa** | `przychód netto ≥ koszty bieżące + rata`, wskaźnik pokrycia ≥ 1,0 w **każdym** roku | luka czynszowa w zł/m²/mies. + rok pierwszego naruszenia |
 | **3. Rekompensata** | `EDB_grant + EDB_kredyt ≤ KN + RZ` przez cały okres powierzenia | nadwyżka w zł + kwota do zwrotu do Funduszu Dopłat |
 
 Projekt domyka się **wyłącznie gdy przechodzą wszystkie trzy**. Wynik zawsze
-wskazuje **wiążące ograniczenie** — który test i który parametr w nim decyduje.
+wskazuje **wiążące ograniczenie** — jednym zdaniem, bez numeru przepisu.
 
-Czynsz zakładany ponad limit ustawowy to **twardy błąd walidacji**, nie porażka
-testu 2. Silnik nie liczy scenariusza bezprawnego.
+### Ograniczenia ustawowe są wbudowane w sterowanie
+
+Suwak czynszu kończy się na limicie ustawowym dla danego poziomu dotacji.
+Limit zależy od udziału mieszkań komunalnych, więc przy ruchu głównego pokrętła
+przelicza się na żywo; stawka ponad nowy limit zostaje ściągnięta i **jest to
+komunikowane** — to jedyne miejsce, gdzie narzędzie zmienia wartość za
+użytkownika.
+
+Ściąganie dzieje się po stronie API, bo przeglądarka nie może znać limitu,
+zanim przesunie pokrętło. Sam silnik pozostaje twardy: czynszu ponad limit nie
+policzy, kto by go nie podał.
 
 ---
 
