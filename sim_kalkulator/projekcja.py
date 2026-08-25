@@ -129,6 +129,16 @@ class Finansowanie:
         """
         return self.wklad_wlasny_wymagany - self.wklad_rzeczowy_laczny
 
+    @property
+    def nadwyzka_wkladu_rzeczowego(self) -> Decimal:
+        """O ile wklad rzeczowy przewyzsza zapotrzebowanie na kapital.
+
+        Dodatnia, gdy dotacja i wniesiony grunt domykaja montaz z zapasem —
+        inwestor nie musi wtedy dokladac zlotowki. Kwota nie jest gotowka
+        do wyjecia: to wartosc gruntu, ktorej montaz nie potrzebowal.
+        """
+        return max(ZERO, -self.wklad_gotowkowy_wymagany)
+
 
 def zbuduj_finansowanie(
     w: Wejscie, a: Alokacja, g: Granty, kwota_kredytu: Optional[Decimal] = None

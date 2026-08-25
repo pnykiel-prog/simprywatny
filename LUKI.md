@@ -261,3 +261,18 @@ w kosztach przedsięwzięcia, ale nikt za niego nie płaci gotówką, więc test
 kapitałowy — pytający o pieniądze — nie może go do tych pieniędzy doliczać.
 Aport gminy trafia do osobnej pozycji, bo nie jest kapitałem inwestora i nie
 nalicza się od niego rozsądnego zysku.
+
+### 11.7. Wkład rzeczowy potrafi przewyższyć zapotrzebowanie
+
+Dotacja 80% w puli komunalnej (art. 13 ust. 1 pkt 3 lit. c) plus wniesiony grunt
+domykają tę pulę z zapasem, jeżeli działka jest droga. Wymagana gotówka wychodzi
+wtedy ujemna, co nic nie znaczy dla inwestora — nie da się „wyjąć" wartości
+gruntu z montażu. Test kapitałowy podaje w takim wypadku zero i nazywa zapas
+osobno, zamiast pokazywać ujemną kwotę.
+
+Kredyt ograniczany jest wkładem rzeczowym **tej samej puli**, nie obu. Przy
+odczycie domyślnym hybryda to dwa odrębne przedsięwzięcia, a kredyt finansuje
+przedsięwzięcie społeczne — grunt wniesiony do puli komunalnej domyka pulę
+komunalną i nie zwalnia zdolności kredytowej po stronie społecznej. Przy
+włączonym przełączniku `hybryda_jako_jedno_przedsiewziecie` to rozróżnienie
+traci sens i jest kandydatem do przeglądu.

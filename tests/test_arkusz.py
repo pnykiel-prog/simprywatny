@@ -188,6 +188,82 @@ class TestPrzeliczenie:
 
 
 @pytest.mark.wolne
+class TestWariantowGruntu:
+    """Rozdz. 8 — arkusz ma odtwarzac kanaly gruntowe, nie tylko wariant domyslny.
+
+    Wariant z aportem uruchamia w formulach dwie rzeczy, ktorych nabycie nie
+    dotyka: samozwrotny limit z § 12 ust. 7 rozp. 766 i odjecie wkladu rzeczowego
+    w tescie kapitalowym.
+    """
+
+    @staticmethod
+    def _skoroszyt_wariantu(tmp_path, **zmiany):
+        import yaml
+
+        from sim_kalkulator.dane import zbuduj
+
+        dane = wspolne.zmien(**zmiany)
+        wejscie = tmp_path / "wariant.yaml"
+        wejscie.write_text(yaml.safe_dump(dane, allow_unicode=True), encoding="utf-8")
+        plik = tmp_path / "wariant.xlsx"
+        arkusz.eksportuj(przelicz(zbuduj(dane)), plik)
+        return wejscie, plik
+
+    @staticmethod
+    def _recalc():
+        import importlib.util
+
+        korzen = Path(__file__).resolve().parent.parent
+        spec = importlib.util.spec_from_file_location(
+            "recalc_wariant", korzen / "scripts" / "recalc.py"
+        )
+        modul = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(modul)
+        return modul
+
+    def test_aport_inwestora_zgadza_sie_z_silnikiem(self, tmp_path):
+        recalc = self._recalc()
+        wejscie, plik = self._skoroszyt_wariantu(
+            tmp_path,
+            grunt__pochodzenie="inwestor",
+            grunt__forma="aport_inwestora",
+            grunt__wartosc=12000000.0,
+            grunt__liczba_lokali_dla_gminy=wspolne.USUN,
+            grunt__pum_lokali_dla_gminy=wspolne.USUN,
+        )
+        przeliczony = recalc.przelicz(plik)
+        bledy, _ = recalc.zbierz_bledy(przeliczony)
+        assert bledy == [], bledy[:10]
+        assert recalc.porownaj_z_silnikiem(przeliczony, wejscie) == []
+
+    def test_dzierzawa_zgadza_sie_z_silnikiem(self, tmp_path):
+        recalc = self._recalc()
+        wejscie, plik = self._skoroszyt_wariantu(
+            tmp_path,
+            grunt__forma="dzierzawa",
+            grunt__liczba_lokali_dla_gminy=wspolne.USUN,
+            grunt__pum_lokali_dla_gminy=wspolne.USUN,
+        )
+        przeliczony = recalc.przelicz(plik)
+        bledy, _ = recalc.zbierz_bledy(przeliczony)
+        assert bledy == [], bledy[:10]
+        assert recalc.porownaj_z_silnikiem(przeliczony, wejscie) == []
+
+    def test_aport_gminy_zgadza_sie_z_silnikiem(self, tmp_path):
+        recalc = self._recalc()
+        wejscie, plik = self._skoroszyt_wariantu(
+            tmp_path,
+            grunt__forma="aport_gminy",
+            grunt__liczba_lokali_dla_gminy=wspolne.USUN,
+            grunt__pum_lokali_dla_gminy=wspolne.USUN,
+        )
+        przeliczony = recalc.przelicz(plik)
+        bledy, _ = recalc.zbierz_bledy(przeliczony)
+        assert bledy == [], bledy[:10]
+        assert recalc.porownaj_z_silnikiem(przeliczony, wejscie) == []
+
+
+@pytest.mark.wolne
 class TestRecznaKontrolaFormul:
     """Rozdz. 8.4 — wyrywkowa kontrola formul w zakladkach projekcji."""
 
@@ -219,9 +295,10 @@ class TestRecznaKontrolaFormul:
         ws = dane["Pula_spoleczna"]
         naglowek = _wiersz_naglowka(ws, "Rok", "Indeks czynszu")
         rok3 = naglowek + 3
-        pokrycie = sum(ws[f"{k}{rok3}"].value for k in "HIJKL")
-        assert abs(ws[f"N{rok3}"].value - pokrycie) < 0.01
-        assert abs(ws[f"O{rok3}"].value - ws[f"G{rok3}"].value / pokrycie) < 1e-9
+        # H..M: eksploatacja, odpis, ubezpieczenie, zarzad, oplata za grunt, rata.
+        pokrycie = sum(ws[f"{k}{rok3}"].value for k in "HIJKLM")
+        assert abs(ws[f"O{rok3}"].value - pokrycie) < 0.01
+        assert abs(ws[f"P{rok3}"].value - ws[f"G{rok3}"].value / pokrycie) < 1e-9
 
     def test_dyskonto_w_rekompensacie_liczone_recznie(self, dane):
         ws = dane["Rekompensata"]
@@ -238,8 +315,8 @@ class TestRecznaKontrolaFormul:
         ws = dane["Pula_komunalna"]
         naglowek = _wiersz_naglowka(ws, "Rok", "Indeks czynszu")
         for rok in range(1, 6):
-            assert ws[f"L{naglowek + rok}"].value == 0
             assert ws[f"M{naglowek + rok}"].value == 0
+            assert ws[f"N{naglowek + rok}"].value == 0
 
 
 @pytest.mark.wolne

@@ -104,6 +104,11 @@ def kredyt_maksymalny_obslugiwalny(
     # Wklad rzeczowy w gruncie juz pokrywa czesc kosztow, wiec kredyt nie ma
     # czego za niego finansowac. Bez tego odjecia kredyt "doplacalby" do aportu,
     # a wynikowy wklad gotowkowy wychodzilby ujemny.
+    #
+    # Odejmuje sie wklad rzeczowy TEJ puli, nie obu. Przy odczycie domyslnym
+    # hybryda to dwa odrebne przedsiewziecia, a kredyt finansuje przedsiewziecie
+    # spoleczne — grunt wniesiony do puli komunalnej domyka pule komunalna
+    # i nie zwalnia zdolnosci kredytowej po stronie spolecznej.
     rzeczowy = _projekcja.wklady_rzeczowe(w, a)
     rzeczowy_spoleczna = rzeczowy[0][0] + rzeczowy[1][0]
     potrzebny = (

@@ -248,6 +248,10 @@ def _zalozenia(wb: Workbook, wynik: Wynik, rej: Rejestr) -> None:
             u.przychod_uoig, "TRUE/FALSE",
             zrodlo="Wyliczone z formy i przelacznikow 9.1-9.2. TRUE obniza dopuszczalna pomoc.",
             podstawa="art. 5 ust. 9 pkt 4 ustawy z 8.12.2006", format_liczby=TEKST)
+    wejscie("grunt_gotowka", "Kanal D: wartosc gruntu placona gotowka",
+            u.wydatek_gotowkowy > 0, "TRUE/FALSE",
+            zrodlo="Wyliczone z formy. FALSE oznacza wklad rzeczowy — koszt bez wydatku.",
+            format_liczby=TEKST)
     wejscie("grunt_do_pasma", "Kanal A: wartosc prawa do limitu", u.wartosc_do_pasma, "zl",
             zrodlo="Wartosc z operatu albo cena po bonifikacie — kwestia 9.3.",
             podstawa="art. 13 ust. 1 pkt 1 ustawy z 8.12.2006")
@@ -527,7 +531,91 @@ def _podstawy_prawne(wb: Workbook, rej: Rejestr) -> None:
     ws.cell(row=wiersz, column=1,
             value="Limit z art. 7c i limit z art. 28 ust. 2 pkt 2 sa niezalezne — wiaze nizszy.").font = Font(
         italic=True, size=9, color="FF666666")
+    wiersz += 2
+
+    wiersz = _matryca_gruntu(ws, wiersz)
     ws.freeze_panes = "A5"
+
+
+def _matryca_gruntu(ws: Worksheet, wiersz: int) -> int:
+    """Matryca skutkow gruntu i zalozenia z rozdz. 9 uzupelnienia nr 2.
+
+    Kazdy skutek niesie oznaczenie zrodla: Z — odczytane w przepisie, W — wniosek
+    z odczytanych przepisow, ? — wymaga potwierdzenia w BGK. Bez tego czytelnik
+    arkusza nie odroznilby przepisu od odczytu.
+    """
+    wiersz = _sekcja(ws, wiersz, "GRUNT — MATRYCA SKUTKOW (pochodzenie x forma)")
+    ws.cell(
+        row=wiersz, column=1,
+        value="Z = odczytane w przepisie   |   W = wniosek z przepisow   |   "
+              "? = do potwierdzenia w BGK",
+    ).font = Font(italic=True, size=9, color="FF666666")
+    wiersz += 1
+
+    naglowki = (
+        "Forma wniesienia", "Pochodzenie", "A: pasmo", "B: w kosztach",
+        "C: przychod UOIG", "D: wydatek", "E: gmina wspolnikiem", "Podstawa",
+    )
+    for kol, tytul in enumerate(naglowki, start=1):
+        komorka = ws.cell(row=wiersz, column=kol, value=tytul)
+        komorka.font = Font(bold=True)
+        komorka.border = RAMKA_DOL
+    wiersz += 1
+
+    def znacznik(wartosc: bool, pewnosc: str, dopisek: str = "") -> str:
+        return f"{'tak' if wartosc else 'nie'}{dopisek} [{pewnosc}]"
+
+    for skutki in prawo.MATRYCA_GRUNTU:
+        ws.cell(row=wiersz, column=1, value=skutki.forma)
+        ws.cell(row=wiersz, column=2, value=skutki.pochodzenie)
+        ws.cell(row=wiersz, column=3,
+                value=znacznik(skutki.pasmo_45, skutki.pasmo_45_pewnosc))
+        ws.cell(
+            row=wiersz, column=4,
+            value=znacznik(
+                skutki.wartosc_w_kosztach,
+                skutki.wartosc_w_kosztach_pewnosc,
+                ", limit 20% w sciezce kredytowej" if skutki.limit_aportowy else "",
+            ),
+        )
+        opis_c = znacznik(skutki.przychod_uoig, skutki.przychod_uoig_pewnosc)
+        if skutki.przelacznik_przychodu:
+            opis_c += f" — przelacznik '{skutki.przelacznik_przychodu}'"
+        ws.cell(row=wiersz, column=5, value=opis_c)
+        ws.cell(row=wiersz, column=6, value=skutki.wydatek)
+        ws.cell(row=wiersz, column=7, value="tak" if skutki.gmina_wspolnikiem else "nie")
+        ws.cell(row=wiersz, column=8, value=skutki.podstawa).font = Font(
+            size=9, color="FF666666")
+        wiersz += 1
+
+    wiersz += 1
+    wiersz = _sekcja(ws, wiersz, "ZALOZENIA WYMAGAJACE POTWIERDZENIA W BGK — rozdz. 9")
+    for kol, tytul in enumerate(
+        ("Kwestia", "Przelacznik", "Odczyt domyslny", "Na czym polega", "Podstawa"), start=1
+    ):
+        komorka = ws.cell(row=wiersz, column=kol, value=tytul)
+        komorka.font = Font(bold=True)
+        komorka.border = RAMKA_DOL
+    wiersz += 1
+
+    for numer, przelacznik, domyslna, opis, podstawa in (
+        prawo.ZALOZENIA_GRUNTOWE_DO_POTWIERDZENIA
+    ):
+        ws.cell(row=wiersz, column=1, value=numer).font = Font(bold=True)
+        ws.cell(row=wiersz, column=2, value=przelacznik)
+        komorka = ws.cell(row=wiersz, column=3, value="TAK" if domyslna else "NIE")
+        komorka.fill = ZOLTE
+        ws.cell(row=wiersz, column=4, value=opis).font = Font(size=9)
+        ws.cell(row=wiersz, column=5, value=podstawa).font = Font(size=9, color="FF666666")
+        wiersz += 1
+
+    wiersz += 1
+    ws.cell(
+        row=wiersz, column=1,
+        value="Wartosc domyslna kazdego z powyzszych jest ZALOZENIEM, nie rozstrzygnieciem "
+              "przepisu. Zmiana przelacznika w zakladce Zalozenia przelicza caly model.",
+    ).font = Font(italic=True, size=9, color="FF666666")
+    return wiersz + 1
 
 
 # ===========================================================================
@@ -583,6 +671,17 @@ def _alokacja(wb: Workbook, wynik: Wynik, rej: Rejestr) -> None:
     rej.zapisz("alok.pum_kom", "Alokacja", _bezwzgledny("D", wiersz))
     wiersz += 1
 
+    etykieta("PUM przychodowe",
+             "Powierzchnia przynoszaca czynsz SIM. W trybie 'lokal za grunt' mniejsza od "
+             "wybudowanej — lokale gminy trzeba wybudowac, ale nie przyniosa czynszu.")
+    formula(2, f"={rej['alok.pum_laczne']}-{rej['grunt_pum_gminy']}", POWIERZCHNIA, zielony=False)
+    formula(3, f"=$B${wiersz}*{rej['alok.udzial_spol']}", POWIERZCHNIA, zielony=False)
+    formula(4, f"=$B${wiersz}*{rej['alok.udzial_kom']}", POWIERZCHNIA, zielony=False)
+    rej.zapisz("alok.pum_przych_laczne", "Alokacja", _bezwzgledny("B", wiersz))
+    rej.zapisz("alok.pum_przych_spol", "Alokacja", _bezwzgledny("C", wiersz))
+    rej.zapisz("alok.pum_przych_kom", "Alokacja", _bezwzgledny("D", wiersz))
+    wiersz += 1
+
     etykieta("Srednie PUM lokalu", "Poza przedzialem 25-80 m2 — patrz zakladka Werdykty.")
     formula(2, f"={rej['alok.pum_laczne']}/{rej['liczba_lokali']}", POWIERZCHNIA)
     rej.zapisz("alok.srednie_pum", "Alokacja", _bezwzgledny("B", wiersz))
@@ -594,21 +693,33 @@ def _alokacja(wb: Workbook, wynik: Wynik, rej: Rejestr) -> None:
 
     # Kanal B: wartosc gruntu wchodzaca do kosztow, juz po limicie z § 12 ust. 7.
     # Limit jest samozwrotny (grunt jest skladnikiem kosztow), wiec rozwiazany
-    # w postaci zamknietej: u = K_bez_gruntu * limit / (1 - limit).
+    # w postaci zamknietej: u = K_bez_gruntu * limit / (1 - limit). Naklada sie go
+    # PER PULA, bo przepis dotyczy przedsiewziecia finansowanego zwrotnie, a przy
+    # domyslnym odczycie hybrydy tylko pula spoleczna korzysta z kredytu.
     etykieta("Grunt uznany w kosztach",
-             "Kanal B. Dzierzawa daje 0; aport w sciezce kredytowej — limit § 12 ust. 7.")
-    koszty_bez_gruntu_wzor = (
-        f"({rej['koszt_budowy_m2']}*{rej['alok.pum_laczne']}+{rej['infrastruktura']}"
-        f"+{rej['projekt_i_nadzor']}+{rej['koszty_ogolne']}+{rej['rezerwa']}+{rej['dzwigi']})"
-    )
-    formula(
-        2,
-        f"=IF({rej['grunt_w_kosztach']}=FALSE,0,"
-        f"IF(AND({rej['grunt_aport']}=TRUE,{rej['kredyt_udzial']}>0),"
-        f"MIN({rej['grunt_wartosc']},{koszty_bez_gruntu_wzor}*{rej['prawo.grunt_aport_limit']}"
-        f"/(1-{rej['prawo.grunt_aport_limit']})),"
-        f"{rej['grunt_wartosc']}))",
-    )
+             "Kanal B. Dzierzawa daje 0; aport w puli kredytowej — limit § 12 ust. 7.")
+
+    def _grunt_puli(udzial: str, kredytowa: bool) -> str:
+        bez_gruntu = (
+            f"({rej['koszt_budowy_m2']}*{rej['alok.pum_laczne']}+{rej['infrastruktura']}"
+            f"+{rej['projekt_i_nadzor']}+{rej['koszty_ogolne']}+{rej['rezerwa']}"
+            f"+{rej['dzwigi']})*{udzial}"
+        )
+        pelny = f"{rej['grunt_wartosc']}*{udzial}"
+        if not kredytowa:
+            return f"IF({rej['grunt_w_kosztach']}=FALSE,0,{pelny})"
+        limit = rej["prawo.grunt_aport_limit"]
+        return (
+            f"IF({rej['grunt_w_kosztach']}=FALSE,0,"
+            f"IF(AND({rej['grunt_aport']}=TRUE,{rej['kredyt_udzial']}>0),"
+            f"MIN({pelny},{bez_gruntu}*{limit}/(1-{limit})),{pelny}))"
+        )
+
+    formula(3, "=" + _grunt_puli(rej["alok.udzial_spol"], True), KWOTA, zielony=False)
+    formula(4, "=" + _grunt_puli(rej["alok.udzial_kom"], False), KWOTA, zielony=False)
+    formula(2, f"=$C${wiersz}+$D${wiersz}", KWOTA, zielony=False)
+    rej.zapisz("alok.grunt_uznany_spol", "Alokacja", _bezwzgledny("C", wiersz))
+    rej.zapisz("alok.grunt_uznany_kom", "Alokacja", _bezwzgledny("D", wiersz))
     rej.zapisz("alok.grunt_uznany", "Alokacja", _bezwzgledny("B", wiersz))
     wiersz += 1
 
@@ -620,8 +731,8 @@ def _alokacja(wb: Workbook, wynik: Wynik, rej: Rejestr) -> None:
     wiersz += 1
 
     pozycje_wspolne = (
-        ("grunt", "Grunt (kanal B, po limicie aportowym)", rej["alok.grunt_uznany"],
-         "Klucz PUM. Nigdy nie przypisywany obu pulom w calosci."),
+        ("grunt", "Grunt (kanal B, po limicie aportowym)", "",
+         "Klucz PUM, limit aportowy nakladany osobno na kazda pule."),
         ("infrastruktura", "Infrastruktura", rej["infrastruktura"], ""),
         ("projekt", "Projekt i nadzor", rej["projekt_i_nadzor"], ""),
         ("ogolne", "Koszty ogolne", rej["koszty_ogolne"], ""),
@@ -630,12 +741,18 @@ def _alokacja(wb: Workbook, wynik: Wynik, rej: Rejestr) -> None:
     )
     for klucz, nazwa, zrodlo, uwaga in pozycje_wspolne:
         etykieta(nazwa, uwaga)
-        formula(2, f"={zrodlo}")
-        formula(3, f"=$B${wiersz}*{rej['alok.udzial_spol']}", KWOTA, zielony=False)
-        formula(4, f"=$B${wiersz}*{rej['alok.udzial_kom']}", KWOTA, zielony=False)
         if klucz == "grunt":
+            # Grunt ma juz wartosci per pula — limit aportowy dotyka tylko puli
+            # kredytowej, wiec podzial nie jest prostym kluczem PUM.
+            formula(3, f"={rej['alok.grunt_uznany_spol']}", KWOTA, zielony=False)
+            formula(4, f"={rej['alok.grunt_uznany_kom']}", KWOTA, zielony=False)
+            formula(2, f"=$C${wiersz}+$D${wiersz}", KWOTA, zielony=False)
             rej.zapisz("alok.grunt_spol", "Alokacja", _bezwzgledny("C", wiersz))
             rej.zapisz("alok.grunt_kom", "Alokacja", _bezwzgledny("D", wiersz))
+        else:
+            formula(2, f"={zrodlo}")
+            formula(3, f"=$B${wiersz}*{rej['alok.udzial_spol']}", KWOTA, zielony=False)
+            formula(4, f"=$B${wiersz}*{rej['alok.udzial_kom']}", KWOTA, zielony=False)
         wiersz += 1
     ostatni_koszt = wiersz - 1
 
@@ -687,6 +804,17 @@ def _alokacja(wb: Workbook, wynik: Wynik, rej: Rejestr) -> None:
                f"*{rej['alok.udzial_kom']}*{rej['alok.mnoznik_vat']})", KWOTA, zielony=False)
     rej.zapisz("alok.grunt_pasmo_spol", "Alokacja", _bezwzgledny("C", wiersz))
     rej.zapisz("alok.grunt_pasmo_kom", "Alokacja", _bezwzgledny("D", wiersz))
+    wiersz += 1
+
+    etykieta("Wklad rzeczowy w gruncie",
+             "Kanal D. Wartosc gruntu, ktora siedzi w kosztach, ale nie wymaga wylozenia "
+             "gotowki — aport, dzialka juz w spolce, prawo od gminy, rozliczenie lokalami.")
+    formula(3, f"=IF({rej['grunt_gotowka']}=TRUE,0,{rej['alok.grunt_podstawa_spol']})",
+            KWOTA, zielony=False)
+    formula(4, f"=IF({rej['grunt_gotowka']}=TRUE,0,{rej['alok.grunt_podstawa_kom']})",
+            KWOTA, zielony=False)
+    rej.zapisz("alok.rzeczowy_spol", "Alokacja", _bezwzgledny("C", wiersz))
+    rej.zapisz("alok.rzeczowy_kom", "Alokacja", _bezwzgledny("D", wiersz))
     wiersz += 1
 
     etykieta("Koszty bez gruntu",
@@ -988,9 +1116,14 @@ def _pula(wb: Workbook, wynik: Wynik, rej: Rejestr, spoleczna: bool) -> None:
         komorka = ws[komorka_kredytu.replace("$", "")]
         # Trzy ograniczenia: ile uniesie czynsz, ile pozwala ustawa i ile
         # kredytu w ogole potrzeba po dotacji i partycypacji.
+        # Wklad rzeczowy w gruncie juz pokrywa czesc kosztow, wiec kredyt nie ma
+        # czego za niego finansowac — bez tego odjecia wynikowy wklad gotowkowy
+        # wychodzilby ujemny. Odejmuje sie wklad rzeczowy TEJ puli — kredyt
+        # finansuje przedsiewziecie spoleczne, a nie komunalne.
         potrzebny = (
             f"({rej[f'{p}.koszty']}-{rej[f'grant.{p}']}"
-            f"-{rej[f'{p}.koszty']}*{rej['partycypacja_stawka']})"
+            f"-{rej[f'{p}.koszty']}*{rej['partycypacja_stawka']}"
+            f"-{rej[f'alok.rzeczowy_{p}']})"
         )
         komorka.value = (
             f"=ROUNDDOWN(MAX(0,MIN(MIN({rej[f'{p}.pulapy']}),"
@@ -1104,7 +1237,7 @@ def _projekcja_arkusz(
     naglowki = [
         "Rok", "Indeks czynszu", "Indeks kosztow", "Czynsz zl/m2/mies.",
         "Przychod potencjalny", "Pustostany", "Przychod netto",
-        "Eksploatacja", "Odpis remontowy", "Ubezpieczenie", "Zarzad",
+        "Eksploatacja", "Odpis remontowy", "Ubezpieczenie", "Zarzad", "Oplata za grunt",
         "Obsluga dlugu", "Rezerwa partycypacji", "Wymagane pokrycie", "DSCR", "Saldo",
         "Pulap kredytu",
     ]
@@ -1120,8 +1253,16 @@ def _projekcja_arkusz(
         if spoleczna
         else f'IF({rej["sw_pustostany_kom"]}=TRUE,{rej["pustostany"]},0)'
     )
-    pum = rej[f"alok.pum_{p}"]
+    # Czynsz i koszty utrzymania licza sie od powierzchni przychodowej: lokale
+    # oddane gminie w trybie "lokal za grunt" nie sa juz lokalami SIM. Ubezpieczenie
+    # i zarzad zostaja na kluczu PUM, bo sa kosztem spolki, nie lokalu.
+    pum = rej[f"alok.pum_przych_{p}"]
     udzial = rej[f"alok.udzial_{'spol' if spoleczna else 'kom'}"]
+    # Oplata roczna za grunt obciaza koszty biezace tylko przy formach, ktore
+    # rozliczaja sie oplata — dzierzawa i uzytkowanie wieczyste.
+    oplata_gruntowa = (
+        f'IF({rej["grunt_oplata_roczna"]}=0,0,{rej["grunt_oplata_roczna"]}*{udzial})'
+    )
 
     pierwszy = wiersz
     for rok in range(1, lat + 1):
@@ -1140,30 +1281,31 @@ def _projekcja_arkusz(
         ws.cell(row=w, column=9, value=f"={rej['odpis_remontowy_m2']}*{pum}*C{w}").number_format = KWOTA
         ws.cell(row=w, column=10, value=f"={rej['ubezpieczenie']}*{udzial}*C{w}").number_format = KWOTA
         ws.cell(row=w, column=11, value=f"={rej['zarzad']}*{udzial}*C{w}").number_format = KWOTA
+        ws.cell(row=w, column=12, value=f"={oplata_gruntowa}*C{w}").number_format = KWOTA
 
         if kredyt and rej.ma(f"{p}.rata_rok_{rok}"):
-            ws.cell(row=w, column=12, value=f"={rej[f'{p}.rata_rok_{rok}']}").number_format = KWOTA
+            ws.cell(row=w, column=13, value=f"={rej[f'{p}.rata_rok_{rok}']}").number_format = KWOTA
         else:
-            ws.cell(row=w, column=12, value="=0").number_format = KWOTA
+            ws.cell(row=w, column=13, value="=0").number_format = KWOTA
 
         if spoleczna:
             # art. 29a ust. 3 — zobowiazanie rosnie wskaznikiem GUS niezaleznie
             # od ponownego zasiedlenia.
             ws.cell(
-                row=w, column=13,
+                row=w, column=14,
                 value=(
                     f"={rej[f'{p}.partycypacja']}*{rej['partycypacja_rotacja']}"
                     f"*(1+{rej['waloryzacja_part']})^{rok}"
                 ),
             ).number_format = KWOTA
         else:
-            ws.cell(row=w, column=13, value="=0").number_format = KWOTA
+            ws.cell(row=w, column=14, value="=0").number_format = KWOTA
 
-        ws.cell(row=w, column=14, value=f"=SUM(H{w}:L{w})").number_format = KWOTA
+        ws.cell(row=w, column=15, value=f"=SUM(H{w}:M{w})").number_format = KWOTA
         ws.cell(
-            row=w, column=15, value=f'=IF(N{w}=0,"",G{w}/N{w})'
+            row=w, column=16, value=f'=IF(O{w}=0,"",G{w}/O{w})'
         ).number_format = WSKAZNIK
-        ws.cell(row=w, column=16, value=f"=G{w}-N{w}-M{w}").number_format = KWOTA
+        ws.cell(row=w, column=17, value=f"=G{w}-O{w}-N{w}").number_format = KWOTA
         if kredyt and rej.ma(f"{p}.annuita_jednostkowa"):
             # Rata jest liniowa wzgledem kwoty kredytu, wiec warunek pokrycia
             # w tym roku sprowadza sie do gornego pulapu kwoty.
@@ -1172,9 +1314,9 @@ def _projekcja_arkusz(
                 f"{rej[f'{p}.annuita_jednostkowa']})"
             )
             ws.cell(
-                row=w, column=17,
+                row=w, column=18,
                 value=(f"=IF({rok}>{rej['kredyt_n']},\"\",IF({wspolczynnik}<=0,\"\","
-                       f"MAX(0,(G{w}-SUM(H{w}:K{w}))/{wspolczynnik})))"),
+                       f"MAX(0,(G{w}-SUM(H{w}:L{w}))/{wspolczynnik})))"),
             ).number_format = KWOTA
         rej.zapisz_wiersz(f"{p}.proj_rok_{rok}", w)
         wiersz += 1
@@ -1183,7 +1325,7 @@ def _projekcja_arkusz(
     rej.zapisz_wiersz(f"{p}.proj_do", ostatni)
 
     ws.cell(row=wiersz, column=1, value="Razem").font = Font(bold=True)
-    for kol in (5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16):
+    for kol in (5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 17):
         litera = get_column_letter(kol)
         komorka = ws.cell(
             row=wiersz, column=kol, value=f"=SUM({litera}{pierwszy}:{litera}{ostatni})"
@@ -1193,23 +1335,23 @@ def _projekcja_arkusz(
     wiersz += 1
 
     ws.cell(row=wiersz, column=1, value="Minimalny DSCR").font = Font(bold=True)
-    komorka = ws.cell(row=wiersz, column=15, value=f"=MIN(O{pierwszy}:O{ostatni})")
+    komorka = ws.cell(row=wiersz, column=16, value=f"=MIN(P{pierwszy}:P{ostatni})")
     komorka.number_format = WSKAZNIK
     komorka.font = Font(bold=True)
-    rej.zapisz(f"{p}.min_dscr", nazwa, _bezwzgledny("O", wiersz))
+    rej.zapisz(f"{p}.min_dscr", nazwa, _bezwzgledny("P", wiersz))
     wiersz += 1
 
     if kredyt and rej.ma(f"{p}.annuita_jednostkowa"):
-        rej.zapisz(f"{p}.pulapy", nazwa, f"$Q${pierwszy}:$Q${ostatni}")
+        rej.zapisz(f"{p}.pulapy", nazwa, f"$R${pierwszy}:$R${ostatni}")
 
     ws.cell(row=wiersz, column=1, value="Lat z DSCR ponizej 1,0").font = Font(bold=True)
     komorka = ws.cell(
-        row=wiersz, column=15,
-        value=f'=COUNTIF(O{pierwszy}:O{ostatni},"<1")',
+        row=wiersz, column=16,
+        value=f'=COUNTIF(P{pierwszy}:P{ostatni},"<1")',
     )
     komorka.number_format = "0"
     komorka.font = Font(bold=True)
-    rej.zapisz(f"{p}.lat_naruszenia", nazwa, _bezwzgledny("O", wiersz))
+    rej.zapisz(f"{p}.lat_naruszenia", nazwa, _bezwzgledny("P", wiersz))
     wiersz += 1
     return wiersz
 
@@ -1325,9 +1467,10 @@ def _rekompensata_puli(ws, wiersz, rej, wynik, p, spoleczna, rek, proj):
         komorka.alignment = Alignment(horizontal="right")
 
         # art. 5 ust. 7-8 — koszty biezace. Koszty stale zarzadu sa w sciezce
-        # kredytowej wskazane wprost przez § 12 ust. 3 rozp. 766.
+        # kredytowej wskazane wprost przez § 12 ust. 3 rozp. 766. Oplata roczna
+        # za grunt (kolumna L) obciaza usluge przez caly okres powierzenia.
         ws.cell(row=w, column=2,
-                value=f"=SUM('{arkusz_puli}'!H{wiersz_puli}:K{wiersz_puli})").number_format = KWOTA
+                value=f"=SUM('{arkusz_puli}'!H{wiersz_puli}:L{wiersz_puli})").number_format = KWOTA
         ws.cell(row=w, column=3,
                 value=(f"=IF({rok}=1,{rej[f'rek.{p}.naklad']},0)" if tylko_rok_pierwszy
                        else f"={rej[f'rek.{p}.naklad']}")).number_format = KWOTA
@@ -1593,10 +1736,21 @@ def _werdykty(wb: Workbook, wynik: Wynik, rej: Rejestr) -> None:
     etykieta("Partycypacja")
     wart(f"={rej['spol.partycypacja']}+{rej['kom.partycypacja']}")
     wiersz += 1
+    etykieta("Wklad rzeczowy w gruncie",
+             "Kanal D. Grunt wniesiony aportem albo prawo ustanowione przez gmine siedzi "
+             "w kosztach, ale nikt za nie nie placi gotowka. Nabycie daje 0.")
+    wart(f"={rej['alok.rzeczowy_spol']}+{rej['alok.rzeczowy_kom']}", KWOTA)
+    rej.zapisz("werd.wklad_rzeczowy", "Werdykty", _bezwzgledny("B", wiersz))
+    wiersz += 1
     etykieta("WYMAGANY WKLAD WLASNY",
              "Glowna liczba wyjsciowa narzedzia. Jeden bilans inwestora — obie pule "
-             "skladaja sie na to samo zapotrzebowanie.")
-    wart(f"={rej['spol.wklad']}+{rej['kom.wklad']}", KWOTA, pogrubione=True)
+             "skladaja sie na to samo zapotrzebowanie. Test pyta o pieniadze, wiec "
+             "wklad rzeczowy w gruncie jest odjety.")
+    wart(
+        f"={rej['spol.wklad']}+{rej['kom.wklad']}-{rej['werd.wklad_rzeczowy']}",
+        KWOTA,
+        pogrubione=True,
+    )
     rej.zapisz("werd.wklad_wymagany", "Werdykty", _bezwzgledny("B", wiersz))
     wiersz += 1
     etykieta("Udzial wkladu w kosztach")

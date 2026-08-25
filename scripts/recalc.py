@@ -109,17 +109,18 @@ def porownaj_z_silnikiem(plik: Path, wejscie: Path) -> List[str]:
         ("Pula_komunalna", "Wklad wlasny", 2, float(r.finansowanie.komunalna.wklad_wlasny)),
         ("Pula_spoleczna", "LIMIT WIAZACY", 2, float(r.limity_spoleczna.limit_wiazacy_m2_mies)),
         ("Pula_komunalna", "LIMIT WIAZACY", 2, float(r.limity_komunalna.limit_wiazacy_m2_mies)),
-        ("Werdykty", "WYMAGANY WKLAD WLASNY", 2, float(r.finansowanie.wklad_wlasny_wymagany)),
+        ("Werdykty", "WYMAGANY WKLAD WLASNY", 2, float(r.finansowanie.wklad_gotowkowy_wymagany)),
+        ("Werdykty", "Wklad rzeczowy w gruncie", 2, float(r.finansowanie.wklad_rzeczowy_laczny)),
     ]
     dostepny = r.wejscie.inwestor.dostepny_wklad_wlasny
     if dostepny is not None:
         kontrole.append((
             "Werdykty", "BRAKUJACY KAPITAL", 2,
-            float(max(0, r.finansowanie.wklad_wlasny_wymagany - dostepny)),
+            float(max(0, r.finansowanie.wklad_gotowkowy_wymagany - dostepny)),
         ))
     if r.projekcja.spoleczna.minimalny_dscr is not None:
         kontrole.append(
-            ("Pula_spoleczna", "Minimalny DSCR", 15, float(r.projekcja.spoleczna.minimalny_dscr))
+            ("Pula_spoleczna", "Minimalny DSCR", 16, float(r.projekcja.spoleczna.minimalny_dscr))
         )
     if r.edb_kredytu > 0:
         kontrole.append(("Rekompensata", "EDB kredytu", 11, float(r.edb_kredytu)))

@@ -89,6 +89,27 @@ def test_montazu(w: Wejscie, fin: Finansowanie) -> Werdykt:
     if fin.wklad_rzeczowy_gminy_laczny > ZERO:
         szczegoly["Wklad rzeczowy gminy (grunt)"] = _zl(fin.wklad_rzeczowy_gminy_laczny)
 
+    # Wklad rzeczowy potrafi przewyzszyc zapotrzebowanie — dotacja 80% w puli
+    # komunalnej plus wniesiony grunt domykaja ja z zapasem. Ujemna "wymagana
+    # gotowka" nic nie znaczy dla inwestora, wiec test podaje zero i nazywa zapas.
+    nadwyzka = fin.nadwyzka_wkladu_rzeczowego
+    if nadwyzka > ZERO:
+        szczegoly["Nadwyzka wkladu rzeczowego"] = _zl(nadwyzka)
+        return Werdykt(
+            numer=1,
+            nazwa="Kapitał",
+            przechodzi=True,
+            wiazace_ograniczenie=(
+                f"Nie musisz dokładać gotówki. Dotacja i wniesiony grunt domykają montaż "
+                f"z zapasem {_zl(nadwyzka)} — o tyle więcej wartości wkładasz działką, "
+                f"niż inwestycja potrzebuje."
+            ),
+            luka_opis="Wymagany wkład własny",
+            luka_kwota=ZERO,
+            luka_jednostka="zl",
+            szczegoly=szczegoly,
+        )
+
     if dostepny is None:
         return Werdykt(
             numer=1,
