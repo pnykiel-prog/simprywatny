@@ -25,8 +25,22 @@ koszty:
 
 grunt:
   wartosc: 2800000.0            # z operatu szacunkowego
-  forma: wlasnosc_inwestora     # wlasnosc_inwestora | aport_inwestora | aport_jst | nabycie | lokal_za_grunt
+  # Poziom 1 — czyja jest dzialka: inwestor | rynek_prywatny | gmina
+  pochodzenie: gmina
+  # Poziom 2 — w jakiej formie trafia do projektu. Zestaw zalezy od pochodzenia:
+  #   inwestor       -> aport_inwestora | spolka_wlascicielem
+  #   rynek_prywatny -> nabycie_prywatne
+  #   gmina          -> nabycie_od_gminy | lokal_za_grunt | aport_gminy
+  #                     | uzytkowanie_wieczyste | dzierzawa
+  forma: nabycie_od_gminy
   obciazony_hipoteka: false
+  # Wymagane przy dzierzawie i uzytkowaniu wieczystym:
+  # oplata_roczna: 0.0
+  # Wymagane przy formie lokal_za_grunt:
+  # liczba_lokali_dla_gminy: 0
+  # pum_lokali_dla_gminy: 0.0
+  # Cena po bonifikacie — potrzebna tylko przy odczycie alternatywnym kwestii 9.3:
+  # cena_nabycia: 0.0
 
 pula_spoleczna:
   kredyt:
@@ -87,6 +101,10 @@ przelaczniki:
   tryb_kredytu: automatyczny
   # Kwestie otwarte rozdz. 10 — wartosci domyslne sa ZALOZENIAMI, nie rozstrzygnieciami.
   hybryda_jako_jedno_przedsiewziecie: false
-  grunt_jst_liczy_sie_do_limitu_grantu: true
+  # Kwestie 9.1-9.3 uzupelnienia nr 2 — grunt. Wartosci domyslne sa ZALOZENIAMI
+  # do potwierdzenia w BGK, nie odczytem przepisu.
+  lokal_za_grunt_jest_przychodem_uoig: false
+  uzytkowanie_wieczyste_jest_przychodem_uoig: true
+  pasmo_liczone_od_wartosci_z_operatu: true
   metoda_rozsadnego_zysku: kapital_zaangazowany
   remont_i_przebudowa: false

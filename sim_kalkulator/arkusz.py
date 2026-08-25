@@ -134,6 +134,7 @@ def _szerokosci(ws: Worksheet, szerokosci: Sequence[Tuple[str, int]]) -> None:
 
 def _zalozenia(wb: Workbook, wynik: Wynik, rej: Rejestr) -> None:
     w = wynik.wejscie
+    u = wynik.grunt
     ws = wb.create_sheet("Zalozenia")
     _szerokosci(ws, [("A", 46), ("B", 20), ("C", 18), ("D", 58), ("E", 52)])
 
@@ -225,14 +226,37 @@ def _zalozenia(wb: Workbook, wynik: Wynik, rej: Rejestr) -> None:
     wejscie("grunt_wartosc", "Wartosc gruntu", w.grunt.wartosc, "zl",
             zrodlo="Z operatu szacunkowego.",
             podstawa="art. 13 ust. 1 pkt 1 ustawy z 8.12.2006", zolte=True)
+    wejscie("grunt_pochodzenie", "Pochodzenie dzialki", w.grunt.pochodzenie.value, "",
+            zrodlo="Poziom 1 wyboru: inwestor / rynek_prywatny / gmina.",
+            format_liczby=TEKST, zolte=True)
     wejscie("grunt_forma", "Forma wniesienia", w.grunt.forma.value, "",
-            zrodlo="Decyduje o ujeciu gruntu w rekompensacie.",
+            zrodlo="Poziom 2. Rozstrzyga cztery kanaly naraz — patrz matryca skutkow.",
             podstawa="art. 5 ust. 7 pkt 7 / art. 5 ust. 9 pkt 4 / § 12 ust. 7 rozp. 766",
-            format_liczby=TEKST)
-    wejscie("grunt_od_jst", "Grunt pochodzi od JST", w.grunt.forma.pochodzi_od_jst, "TRUE/FALSE",
-            zrodlo="Wyliczone z formy wniesienia.", format_liczby=TEKST)
-    wejscie("grunt_aport", "Grunt wniesiony aportem", w.grunt.forma.wniesiony_aportem,
-            "TRUE/FALSE", zrodlo="Wyliczone z formy wniesienia.", format_liczby=TEKST)
+            format_liczby=TEKST, zolte=True)
+    wejscie("grunt_pasmo_45", "Kanal A: forma daje pasmo ponad prog", u.pasmo_45, "TRUE/FALSE",
+            zrodlo="Wyliczone z formy. FALSE scina wsparcie do progu gruntowego.",
+            podstawa="art. 13 ust. 1 pkt 1 ustawy z 8.12.2006", format_liczby=TEKST)
+    wejscie("grunt_w_kosztach", "Kanal B: wartosc wchodzi do kosztow",
+            u.wartosc_w_kosztach > 0, "TRUE/FALSE",
+            zrodlo="Wyliczone z formy. Przy dzierzawie FALSE — liczy sie oplata roczna.",
+            podstawa="art. 5 ust. 7 pkt 7 i ust. 8 ustawy z 8.12.2006", format_liczby=TEKST)
+    wejscie("grunt_aport", "Kanal B: wklad niepieniezny (limit 20%)",
+            u.limit_aportowy_dotyczy, "TRUE/FALSE",
+            zrodlo="Wyliczone z formy. Limit dziala tylko w sciezce kredytowej.",
+            podstawa="§ 12 ust. 7 rozp. t.j. Dz.U. 2021 poz. 766", format_liczby=TEKST)
+    wejscie("grunt_przychod_uoig", "Kanal C: wartosc jest przychodem UOIG",
+            u.przychod_uoig, "TRUE/FALSE",
+            zrodlo="Wyliczone z formy i przelacznikow 9.1-9.2. TRUE obniza dopuszczalna pomoc.",
+            podstawa="art. 5 ust. 9 pkt 4 ustawy z 8.12.2006", format_liczby=TEKST)
+    wejscie("grunt_do_pasma", "Kanal A: wartosc prawa do limitu", u.wartosc_do_pasma, "zl",
+            zrodlo="Wartosc z operatu albo cena po bonifikacie — kwestia 9.3.",
+            podstawa="art. 13 ust. 1 pkt 1 ustawy z 8.12.2006")
+    wejscie("grunt_oplata_roczna", "Kanal D: oplata roczna za grunt", u.oplata_roczna, "zl/rok",
+            zrodlo="Dzierzawa albo uzytkowanie wieczyste. Koszt biezacy, nie kapitalowy.",
+            zolte=bool(u.oplata_roczna))
+    wejscie("grunt_pum_gminy", "Lokale dla gminy — PUM", u.pum_dla_gminy, "m2",
+            zrodlo="Tryb 'lokal za grunt'. Ta powierzchnia nie przynosi czynszu.",
+            podstawa="ustawa z 16.12.2020, Dz.U. 2021 poz. 223", zolte=bool(u.pum_dla_gminy))
 
     # --- pula spoleczna ---
     wiersz = _sekcja(ws, wiersz, "PULA SPOLECZNA")
@@ -340,9 +364,19 @@ def _zalozenia(wb: Workbook, wynik: Wynik, rej: Rejestr) -> None:
             pzz.hybryda_jako_jedno_przedsiewziecie, "TRUE/FALSE",
             zrodlo="Kwestia otwarta 10.1. Domyslnie dwa odrebne przedsiewziecia.",
             podstawa="art. 13 ust. 1a w zw. z art. 5a ust. 1 i 3", format_liczby=TEKST, zolte=True)
-    wejscie("sw_grunt_jst", "Grunt JST liczy sie do limitu grantu",
-            pzz.grunt_jst_liczy_sie_do_limitu_grantu, "TRUE/FALSE",
-            zrodlo="Odczyt literalny: po wniesieniu grunt jest we wladaniu inwestora.",
+    wejscie("sw_lokal_za_grunt_przychod", "9.1 Lokal za grunt jest przychodem UOIG",
+            pzz.lokal_za_grunt_jest_przychodem_uoig, "TRUE/FALSE",
+            zrodlo="Domyslnie FALSE — to nabycie, a nie wniesienie przez JST. "
+                   "ZALOZENIE do potwierdzenia w BGK.",
+            podstawa="art. 5 ust. 9 pkt 4 ustawy z 8.12.2006", format_liczby=TEKST, zolte=True)
+    wejscie("sw_uw_przychod", "9.2 Uzytkowanie wieczyste jest przychodem UOIG",
+            pzz.uzytkowanie_wieczyste_jest_przychodem_uoig, "TRUE/FALSE",
+            zrodlo="Domyslnie TRUE — wariant ostrozniejszy. ZALOZENIE do potwierdzenia w BGK.",
+            podstawa="art. 5 ust. 9 pkt 4 ustawy z 8.12.2006", format_liczby=TEKST, zolte=True)
+    wejscie("sw_pasmo_operat", "9.3 Pasmo liczone od wartosci z operatu",
+            pzz.pasmo_liczone_od_wartosci_z_operatu, "TRUE/FALSE",
+            zrodlo="Domyslnie TRUE — przepis mowi o wartosci prawa, nie o cenie nabycia. "
+                   "ZALOZENIE do potwierdzenia w BGK.",
             podstawa="art. 13 ust. 1 pkt 1 ustawy z 8.12.2006", format_liczby=TEKST, zolte=True)
     wejscie("sw_remont", "Remont i przebudowa zamiast budowy",
             pzz.remont_i_przebudowa, "TRUE/FALSE",
@@ -558,6 +592,26 @@ def _alokacja(wb: Workbook, wynik: Wynik, rej: Rejestr) -> None:
     wiersz += 1
     wiersz = _sekcja(ws, wiersz, "POZYCJE KOSZTOWE (netto)")
 
+    # Kanal B: wartosc gruntu wchodzaca do kosztow, juz po limicie z § 12 ust. 7.
+    # Limit jest samozwrotny (grunt jest skladnikiem kosztow), wiec rozwiazany
+    # w postaci zamknietej: u = K_bez_gruntu * limit / (1 - limit).
+    etykieta("Grunt uznany w kosztach",
+             "Kanal B. Dzierzawa daje 0; aport w sciezce kredytowej — limit § 12 ust. 7.")
+    koszty_bez_gruntu_wzor = (
+        f"({rej['koszt_budowy_m2']}*{rej['alok.pum_laczne']}+{rej['infrastruktura']}"
+        f"+{rej['projekt_i_nadzor']}+{rej['koszty_ogolne']}+{rej['rezerwa']}+{rej['dzwigi']})"
+    )
+    formula(
+        2,
+        f"=IF({rej['grunt_w_kosztach']}=FALSE,0,"
+        f"IF(AND({rej['grunt_aport']}=TRUE,{rej['kredyt_udzial']}>0),"
+        f"MIN({rej['grunt_wartosc']},{koszty_bez_gruntu_wzor}*{rej['prawo.grunt_aport_limit']}"
+        f"/(1-{rej['prawo.grunt_aport_limit']})),"
+        f"{rej['grunt_wartosc']}))",
+    )
+    rej.zapisz("alok.grunt_uznany", "Alokacja", _bezwzgledny("B", wiersz))
+    wiersz += 1
+
     etykieta("Koszt budowy", "Przypisany wprost wg wlasnego PUM kazdej puli.")
     formula(2, f"={rej['koszt_budowy_m2']}*{rej['alok.pum_laczne']}")
     formula(3, f"={rej['koszt_budowy_m2']}*{rej['alok.pum_spol']}", KWOTA, zielony=False)
@@ -566,7 +620,8 @@ def _alokacja(wb: Workbook, wynik: Wynik, rej: Rejestr) -> None:
     wiersz += 1
 
     pozycje_wspolne = (
-        ("grunt", "Grunt", rej["grunt_wartosc"], "Klucz PUM. Nigdy nie przypisywany obu pulom w calosci."),
+        ("grunt", "Grunt (kanal B, po limicie aportowym)", rej["alok.grunt_uznany"],
+         "Klucz PUM. Nigdy nie przypisywany obu pulom w calosci."),
         ("infrastruktura", "Infrastruktura", rej["infrastruktura"], ""),
         ("projekt", "Projekt i nadzor", rej["projekt_i_nadzor"], ""),
         ("ogolne", "Koszty ogolne", rej["koszty_ogolne"], ""),
@@ -621,6 +676,17 @@ def _alokacja(wb: Workbook, wynik: Wynik, rej: Rejestr) -> None:
     formula(4, f"={rej['alok.grunt_kom']}*{rej['alok.mnoznik_vat']}", KWOTA, zielony=False)
     rej.zapisz("alok.grunt_podstawa_spol", "Alokacja", _bezwzgledny("C", wiersz))
     rej.zapisz("alok.grunt_podstawa_kom", "Alokacja", _bezwzgledny("D", wiersz))
+    wiersz += 1
+
+    etykieta("Grunt do pasma dotacji (z VAT)",
+             "Kanal A. Wartosc prawa z art. 13 ust. 1 pkt 1 — bez limitu aportowego. "
+             "0, gdy forma nie daje ani wlasnosci, ani uzytkowania wieczystego.")
+    formula(3, f"=IF({rej['grunt_pasmo_45']}=FALSE,0,{rej['grunt_do_pasma']}"
+               f"*{rej['alok.udzial_spol']}*{rej['alok.mnoznik_vat']})", KWOTA, zielony=False)
+    formula(4, f"=IF({rej['grunt_pasmo_45']}=FALSE,0,{rej['grunt_do_pasma']}"
+               f"*{rej['alok.udzial_kom']}*{rej['alok.mnoznik_vat']})", KWOTA, zielony=False)
+    rej.zapisz("alok.grunt_pasmo_spol", "Alokacja", _bezwzgledny("C", wiersz))
+    rej.zapisz("alok.grunt_pasmo_kom", "Alokacja", _bezwzgledny("D", wiersz))
     wiersz += 1
 
     etykieta("Koszty bez gruntu",
@@ -682,9 +748,9 @@ def _granty_w_alokacji(ws: Worksheet, wiersz: int, rej: Rejestr) -> int:
     wiersz += 1
 
     etykieta("Grunt wliczany do limitu",
-             "Grunt JST liczony wg przelacznika — ZALOZENIE, patrz Zalozenia.")
-    formula(3, f"=IF(AND({rej['grunt_od_jst']}=TRUE,{rej['sw_grunt_jst']}=FALSE),0,"
-               f"{rej['alok.grunt_podstawa_spol']})")
+             "Kanal A — art. 13 ust. 1 pkt 1. Forma bez prawa wlasnosci i bez "
+             "uzytkowania wieczystego daje 0, niezaleznie od wartosci dzialki.")
+    formula(3, f"={rej['alok.grunt_pasmo_spol']}")
     rej.zapisz("grant.grunt_wliczany", "Alokacja", _bezwzgledny("C", wiersz))
     wiersz += 1
 
@@ -1193,28 +1259,25 @@ def _rekompensata_puli(ws, wiersz, rej, wynik, p, spoleczna, rek, proj):
     etykieta("Ujecie gruntu", rek.grunt_ujecie)
     wiersz += 1
 
-    etykieta("Grunt jako koszt (rok 1)")
-    if sciezka_kredytowa:
-        if wynik.wejscie.grunt.forma.wniesiony_aportem:
-            wzor = (f"=MIN({rej[f'alok.grunt_podstawa_{p}']},{rej[f'alok.koszty_{p}']}"
-                    f"*{rej['prawo.grunt_aport_limit']})")
-        else:
-            wzor = f"={rej[f'alok.grunt_podstawa_{p}']}"
-    elif wynik.wejscie.grunt.forma.pochodzi_od_jst:
-        wzor = "=0"
-    else:
-        wzor = f"={rej[f'alok.grunt_podstawa_{p}']}"
+    # Kanaly B i C wykluczaja sie: grunt, ktorego inwestor nie kupil, nie jest
+    # kosztem uslugi, a grunt, ktory kupil, nie jest jego przychodem. Wartosc
+    # w kosztach jest juz po limicie z § 12 ust. 7, bo limit naklada Alokacja.
+    etykieta("Grunt jako koszt (rok 1)",
+             "Kanal B. 0, gdy wartosc gruntu jest przychodem uslugi publicznej.")
+    wzor = (
+        f"=IF({rej['grunt_przychod_uoig']}=TRUE,0,{rej[f'alok.grunt_podstawa_{p}']})"
+    )
     komorka = ws.cell(row=wiersz, column=2, value=wzor)
     komorka.number_format = KWOTA
     rej.zapisz(f"rek.{p}.grunt_koszt", "Rekompensata", _bezwzgledny("B", wiersz))
     wiersz += 1
 
     etykieta("Grunt jako przychod (rok 1)",
-             "art. 5 ust. 9 pkt 4 — grunt JST obniza koszty netto.")
+             "Kanal C — art. 5 ust. 9 pkt 4. Grunt wniesiony przez gmine obniza KN. "
+             "Przychod bierze pelna wartosc z operatu, bez limitu aportowego.")
     wzor = (
-        f"={rej[f'alok.grunt_podstawa_{p}']}"
-        if (not sciezka_kredytowa and wynik.wejscie.grunt.forma.pochodzi_od_jst)
-        else "=0"
+        f"=IF({rej['grunt_przychod_uoig']}=TRUE,{rej['grunt_wartosc']}"
+        f"*{rej['alok.udzial_' + p]},0)"
     )
     komorka = ws.cell(row=wiersz, column=2, value=wzor)
     komorka.number_format = KWOTA

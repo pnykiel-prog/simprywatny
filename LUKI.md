@@ -180,3 +180,84 @@ Wymóg umowy z gminą przy kredycie SBC dla prywatnego SIM (Informator BGK wią�
 go z SIM, w których gminy mają ponad 50% głosów) nie jest parametrem
 obliczeniowym i nie został zaimplementowany. Jest to warunek dopuszczalności
 do sprawdzenia przed złożeniem wniosku, nie element montażu finansowego.
+
+---
+
+## 11. Grunt — cztery kanały, trzy pytania do BGK i trzy założenia modelowe
+
+Uzupełnienie nr 2 do specyfikacji rozbiło grunt na dwa poziomy (pochodzenie ×
+forma) i cztery kanały oddziaływania. Matryca skutków siedzi w
+`prawo.MATRYCA_GRUNTU`, po jednym wierszu na formę, z oznaczeniem pewności
+każdego skutku: **Z** — odczytane w przepisie, **W** — wniosek z odczytanych
+przepisów, **?** — wymaga potwierdzenia w BGK.
+
+### 11.1. Trzy kwestie oznaczone [?] — przełączniki z jawnym założeniem
+
+| Nr | Przełącznik | Domyślnie | Czego dotyczy |
+|---|---|---|---|
+| 9.1 | `lokal_za_grunt_jest_przychodem_uoig` | `false` | Czy grunt nabyty w trybie „lokal za grunt" jest przychodem usługi publicznej. Przyjęto, że **nie** — to nabycie, a nie wniesienie przez JST. |
+| 9.2 | `uzytkowanie_wieczyste_jest_przychodem_uoig` | `true` | Czy wartość prawa użytkowania wieczystego ustanowionego przez gminę jest przychodem. Przyjęto wariant **ostrożniejszy**: jest. |
+| 9.3 | `pasmo_liczone_od_wartosci_z_operatu` | `true` | Czy bonifikata przy sprzedaży przez gminę obniża wartość przyjmowaną do pasma dotacji. Przyjęto, że **nie** — art. 13 ust. 1 pkt 1 mówi o wartości prawa, nie o cenie nabycia. |
+
+Odczyt alternatywny kwestii 9.3 wymaga podania `grunt.cena_nabycia`. Silnik nie
+zgaduje wysokości bonifikaty — jej brak przy wyłączonym przełączniku zatrzymuje
+obliczenie.
+
+### 11.2. Limit z § 12 ust. 7 rozp. 766 jest samozwrotny
+
+Przepis ogranicza zaliczenie wartości gruntu wniesionego jako wkład niepieniężny
+do 20% **całkowitych kosztów przedsięwzięcia** — a wartość gruntu jest składnikiem
+tych kosztów. Model rozwiązuje warunek tak, żeby udział gruntu w podstawie
+faktycznie przyjętej wyszedł dokładnie na limicie:
+
+    u = K_bez_gruntu × limit / (1 − limit)
+
+**Odczyt alternatywny:** 20% kosztów liczonych z pełną, nieobciętą wartością
+gruntu. Daje kwotę wyższą, a udział w podstawie faktycznie przyjętej — poniżej
+limitu. Do potwierdzenia w BGK.
+
+### 11.3. Kanały B i C wykluczają się
+
+Grunt, za który inwestor nie zapłacił, nie jest kosztem świadczenia usługi;
+grunt, który kupił, nie jest jego przychodem. Model nigdy nie ujmuje tej samej
+wartości po obu stronach rachunku kosztów netto — gdyby to robił, efekt netto
+byłby zerowy i asymetria z art. 5 ust. 9 pkt 4 zniknęłaby z wyniku. Dotyczy to
+także ścieżki kredytowej: aport gminy pozostaje tam przychodem, a nie kosztem
+limitowanym.
+
+### 11.4. „Lokal za grunt" — z której puli pochodzą lokale dla gminy
+
+Specyfikacja mówi, że PUM dostępne na wynajem maleje o powierzchnię lokali
+przekazywanych gminie, ale **nie wskazuje puli**, z której pochodzą. Model
+pomniejsza powierzchnię przychodową obu pul proporcjonalnie, kluczem PUM — tym
+samym, którym dzieli koszty wspólne. **ZAŁOŻENIE modelowe**, sygnalizowane
+ostrzeżeniem `ZALOZENIE_LOKAL_ZA_GRUNT_PODZIAL_PUM`.
+
+Konsekwencje przyjęte razem z nim:
+
+- koszt przedsięwzięcia pozostaje pełny — te lokale trzeba wybudować,
+- lokale oddane gminie nie obciążają SIM kosztem eksploatacji ani odpisem
+  remontowym, bo nie są już jej lokalami; ubezpieczenie i koszty zarządu zostają
+  na kluczu PUM, bo są kosztem spółki, nie lokalu,
+- podstawa alternatywna limitu czynszu z art. 28 ust. 2b liczona jest od **pełnej**
+  powierzchni wybudowanej. Dzielenie pełnego kosztu przez zmniejszoną powierzchnię
+  podniosłoby limit czynszu, a przepis mówi o koszcie budowy lokalu, nie o koszcie
+  projektu rozłożonym na lokale pozostałe.
+
+### 11.5. Hipoteka na nieruchomości wnoszonej aportem
+
+§ 12 ust. 6 rozp. 766 zakazuje wnoszenia aportem nieruchomości obciążonej
+hipoteką — przepis dotyczy wprost ścieżki finansowania zwrotnego. Kalkulator
+blokuje ten wariant **także poza tą ścieżką**, bo hipoteka na gruncie wniesionym
+do spółki obciąża majątek SIM niezależnie od źródła finansowania. To jest
+rozszerzenie zakresu przepisu, przyjęte świadomie i zgodnie z rozdz. 5
+uzupełnienia nr 2, które każe traktować ten warunek zerojedynkowo.
+
+### 11.6. Kanał D nie ma podstawy w przepisie
+
+Podział wkładu na część rzeczową i pieniężną jest klasyfikacją modelu, nie
+kategorią ustawową. Wynika z prostej obserwacji: grunt wniesiony aportem siedzi
+w kosztach przedsięwzięcia, ale nikt za niego nie płaci gotówką, więc test
+kapitałowy — pytający o pieniądze — nie może go do tych pieniędzy doliczać.
+Aport gminy trafia do osobnej pozycji, bo nie jest kapitałem inwestora i nie
+nalicza się od niego rozsądnego zysku.

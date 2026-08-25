@@ -9,16 +9,19 @@ gdzie rb to stopa bazowa KE na dzien zawarcia umowy, a n to ostatni rok okresu
 powierzenia.
 
 ASYMETRIA GRUNTU — najlatwiejsze miejsce na blad:
-  * grunt inwestora, sciezka grantowa  -> KOSZT, bez limitu procentowego
-                                          (art. 5 ust. 7 pkt 7 i ust. 8),
-  * grunt JST wniesiony aportem,
-    sciezka grantowa                   -> PRZYCHOD inwestora, obniza KN
+  * grunt, za ktory inwestor zaplacil albo ktory wniosl z wlasnego majatku
+                                       -> KOSZT (art. 5 ust. 7 pkt 7 i ust. 8),
+                                          w sciezce kredytowej ograniczony do
+                                          20% kosztow, gdy wniesiono go aportem
+                                          (§ 12 ust. 7 rozp. 766),
+  * grunt wniesiony przez gmine        -> PRZYCHOD uslugi publicznej, obniza KN
                                           (art. 5 ust. 9 pkt 4),
-  * grunt wniesiony aportem,
-    sciezka kredytowa                  -> KOSZT, ale tylko do 20% calkowitych
-                                          kosztow przedsiewziecia (§ 12 ust. 7 rozp. 766).
+  * grunt wydzierzawiony               -> poza podstawa; obciaza koszty biezace
+                                          czynszem dzierzawnym.
 
-Grunt inwestora podnosi podstawe, grunt gminy ja obniza.
+Ten sam grunt o tej samej wartosci PODNOSI podstawe, gdy pochodzi od inwestora,
+i OBNIZA dopuszczalna pomoc, gdy pochodzi od gminy. O tym, ktora regula dziala,
+rozstrzyga forma wniesienia — patrz `grunt.py`.
 """
 
 from __future__ import annotations
@@ -36,6 +39,7 @@ from .dane import (
     UjecieKosztowInwestycyjnych,
     Wejscie,
 )
+from .grunt import rozstrzygnij
 from .kredyt import Harmonogram, edb_grant
 from .projekcja import FinansowaniePuli, ProjekcjaPuli
 from .waluta import ZERO, bezpieczny_iloraz
@@ -166,38 +170,59 @@ class TestRekompensaty:
 def ujecie_gruntu(
     w: Wejscie, pula: PulaKosztow, sciezka_kredytowa: bool
 ) -> Tuple[Decimal, Decimal, str]:
-    """Zwraca (grunt_jako_koszt, grunt_jako_przychod, opis)."""
-    wartosc = pula.grunt
-    if wartosc <= ZERO:
-        return ZERO, ZERO, "brak pozycji gruntowej"
+    """Kanal C — zwraca (grunt_jako_koszt, grunt_jako_przychod, opis).
 
-    if sciezka_kredytowa:
-        if w.grunt.forma.wniesiony_aportem:
-            # § 12 ust. 7 rozp. 766 — koszt, ale tylko do 20% calkowitych kosztow.
-            pulap = pula.koszty_przedsiewziecia * prawo.GRUNT_APORT_LIMIT_W_KOSZTACH_KREDYT
-            uznany = min(wartosc, pulap)
-            opis = (
-                f"sciezka kredytowa, grunt z aportu: koszt do "
-                f"{prawo.GRUNT_APORT_LIMIT_W_KOSZTACH_KREDYT:.0%} kosztow przedsiewziecia "
-                f"(§ 12 ust. 7 rozp. 766)"
-            )
-            if uznany < wartosc:
-                opis += f" — obcieto {wartosc - uznany:.2f} zl"
-            return uznany, ZERO, opis
-        return wartosc, ZERO, "sciezka kredytowa, grunt nie z aportu: koszt bez limitu"
+    Kanaly B i C nie moga zadzialac naraz. Grunt, ktorego inwestor nie kupil,
+    nie jest kosztem swiadczenia uslugi; grunt, ktory kupil, nie jest jego
+    przychodem. Gdyby ta sama wartosc weszla po obu stronach, wynik netto bylby
+    zerowy i asymetria z art. 5 ust. 9 pkt 4 — dla ktorej ten modul istnieje —
+    zniknelaby z rachunku.
 
-    if w.grunt.forma.pochodzi_od_jst:
-        # art. 5 ust. 9 pkt 4 — grunt JST jest PRZYCHODEM inwestora i obniza KN.
+    Wartosc gruntu w kosztach jest juz po limicie z § 12 ust. 7 rozp. 766, bo
+    limit dziala na podstawe kosztowa i nakladany jest w `alokacja.build`.
+    Przychod z art. 5 ust. 9 pkt 4 zadnego limitu nie ma — mowa w nim o wartosci
+    nieruchomosci wniesionej, a nie o kwocie zaliczonej do kosztow.
+    """
+    u = rozstrzygnij(w)
+
+    if u.przychod_uoig:
+        wartosc = u.wartosc_operatu * pula.udzial_pum
+        if wartosc <= ZERO:
+            return ZERO, ZERO, "brak pozycji gruntowej"
         return (
             ZERO,
             wartosc,
-            "sciezka grantowa, grunt JST: przychod inwestora, obniza KN (art. 5 ust. 9 pkt 4)",
+            f"grunt od gminy w formie '{u.forma.value}': przychod uslugi publicznej, "
+            "obniza KN (art. 5 ust. 9 pkt 4)",
         )
-    # art. 5 ust. 7 pkt 7 i ust. 8 — grunt inwestora jest kosztem, bez limitu procentowego.
+
+    wartosc = pula.grunt
+    if wartosc <= ZERO:
+        if u.oplata_roczna > ZERO:
+            return (
+                ZERO,
+                ZERO,
+                f"forma '{u.forma.value}': wartosc gruntu poza kosztami, "
+                "oplata roczna obciaza koszty biezace",
+            )
+        return ZERO, ZERO, "brak pozycji gruntowej"
+
+    if sciezka_kredytowa and u.limit_aportowy_dotyczy:
+        opis = (
+            f"sciezka kredytowa, grunt z aportu: koszt do "
+            f"{prawo.GRUNT_APORT_LIMIT_W_KOSZTACH_KREDYT:.0%} kosztow przedsiewziecia "
+            f"(§ 12 ust. 7 rozp. 766)"
+        )
+        if pula.grunt_obciety_limitem > ZERO:
+            opis += f" — obcieto {pula.grunt_obciety_limitem:.2f} zl"
+        return wartosc, ZERO, opis
+
+    # art. 5 ust. 7 pkt 7 i ust. 8 — grunt inwestora jest kosztem, bez limitu.
     return (
         wartosc,
         ZERO,
-        "sciezka grantowa, grunt inwestora: koszt bez limitu (art. 5 ust. 7 pkt 7 i ust. 8)",
+        f"forma '{u.forma.value}': koszt bez limitu procentowego "
+        "(art. 5 ust. 7 pkt 7 i ust. 8)",
     )
 
 
@@ -222,7 +247,7 @@ def rozsadny_zysk(
     # ZALOZENIE: godziwy zwrot ze srodkow wlasnych zaangazowanych w przedsiewziecie,
     # naliczany stopa IRS BGK rocznie i dyskontowany stopa bazowa KE — tak samo
     # jak strumien kosztow netto, zeby obie strony nierownosci byly porownywalne.
-    kapital = max(ZERO, fin.wklad_wlasny)
+    kapital = max(ZERO, fin.kapital_inwestora)
     rb = w.parametry_zewnetrzne.stopa_bazowa_ke
     rz = ZERO
     for rok in range(1, lat + 1):
@@ -276,12 +301,10 @@ def _rekompensata_puli(
         # art. 5 ust. 7-8 — koszty biezace swiadczenia uslugi. Koszty stale zarzadu
         # sa w sciezce kredytowej wskazane wprost jako wklad we wspolne koszty stale
         # (§ 12 ust. 3 rozp. 766); model ujmuje je w obu sciezkach.
-        koszty_biezace = (
-            rok_proj.koszt_eksploatacji
-            + rok_proj.odpis_remontowy
-            + rok_proj.ubezpieczenie
-            + rok_proj.koszty_zarzadu
-        )
+        # Oplata roczna za grunt (dzierzawa, uzytkowanie wieczyste) siedzi
+        # w kosztach operacyjnych projekcji i musi trafic tu razem z reszta —
+        # jest kosztem swiadczenia uslugi przez caly okres powierzenia.
+        koszty_biezace = rok_proj.koszty_operacyjne
         odsetki = ZERO
         if h is not None and 1 <= i <= len(h.raty):
             odsetki = h.raty[i - 1].odsetki

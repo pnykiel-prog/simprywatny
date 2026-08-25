@@ -66,24 +66,80 @@ class Ostrzezenie:
         return f"[{self.kod}] {self.tresc}" + (f" ({self.podstawa})" if self.podstawa else "")
 
 
+class PochodzenieGruntu(str, Enum):
+    """Poziom 1 pytania o grunt — czyja jest dzialka.
+
+    Sam w sobie nie zmienia zadnej liczby; rozstrzyga, ktore formy wniesienia
+    sa w ogole dopuszczalne (`prawo.FORMY_WG_POCHODZENIA`).
+    """
+
+    INWESTOR = prawo.POCHODZENIE_INWESTOR
+    RYNEK_PRYWATNY = prawo.POCHODZENIE_RYNEK_PRYWATNY
+    GMINA = prawo.POCHODZENIE_GMINA
+
+    @property
+    def etykieta(self) -> str:
+        return prawo.ETYKIETY_POCHODZENIA[self.value]
+
+    @property
+    def formy(self) -> tuple:
+        return tuple(FormaGruntu(f) for f in prawo.formy_dla_pochodzenia(self.value))
+
+    def formy_wartosci(self) -> tuple:
+        return prawo.formy_dla_pochodzenia(self.value)
+
+
 class FormaGruntu(str, Enum):
-    WLASNOSC_INWESTORA = "wlasnosc_inwestora"
+    """Poziom 2 pytania o grunt — w jakiej formie dzialka trafia do projektu.
+
+    Wszystkie skutki formy siedza w matrycy w `prawo.MATRYCA_GRUNTU`, nie tutaj.
+    Enum wystawia je tylko jako wlasciwosci, zeby reszta silnika nie musiala
+    znac ani nazw form, ani przepisow.
+    """
+
     APORT_INWESTORA = "aport_inwestora"
-    APORT_JST = "aport_jst"
-    NABYCIE = "nabycie"
+    SPOLKA_WLASCICIELEM = "spolka_wlascicielem"
+    NABYCIE_PRYWATNE = "nabycie_prywatne"
+    NABYCIE_OD_GMINY = "nabycie_od_gminy"
     LOKAL_ZA_GRUNT = "lokal_za_grunt"
+    APORT_GMINY = "aport_gminy"
+    UZYTKOWANIE_WIECZYSTE = "uzytkowanie_wieczyste"
+    DZIERZAWA = "dzierzawa"
+
+    @property
+    def skutki(self) -> prawo.SkutkiFormyGruntu:
+        """Wiersz matrycy skutkow — rozdz. 3 uzupelnienia nr 2."""
+        return prawo.skutki_gruntu(self.value)
+
+    @property
+    def pochodzenie(self) -> "PochodzenieGruntu":
+        return PochodzenieGruntu(self.skutki.pochodzenie)
 
     @property
     def wniesiony_aportem(self) -> bool:
-        return self in (FormaGruntu.APORT_INWESTORA, FormaGruntu.APORT_JST)
+        """Wklad niepieniezny — § 12 ust. 6 i 7 rozp. 766."""
+        return self.value in prawo.FORMY_APORTOWE
 
     @property
-    def pochodzi_od_jst(self) -> bool:
-        """Grunt wniesiony przez gmine — w sciezce grantowej jest PRZYCHODEM inwestora.
+    def daje_pasmo_45(self) -> bool:
+        """Kanal A: czy forma odblokowuje wsparcie ponad prog gruntowy.
 
-        art. 5 ust. 9 pkt 4 ustawy z 8.12.2006. Patrz `rekompensata.py`.
+        art. 13 ust. 1 pkt 1 ustawy z 8.12.2006 mowi o wartosci prawa wlasnosci
+        albo uzytkowania wieczystego. Dzierzawa nie jest zadnym z tych praw.
         """
-        return self in (FormaGruntu.APORT_JST, FormaGruntu.LOKAL_ZA_GRUNT)
+        return self.value in prawo.FORMY_DAJACE_PASMO_45
+
+    @property
+    def wymaga_oplaty_rocznej(self) -> bool:
+        return self.value in prawo.FORMY_Z_OPLATA_ROCZNA
+
+    @property
+    def etykieta(self) -> str:
+        return self.skutki.etykieta
+
+    @property
+    def podpis(self) -> str:
+        return self.skutki.podpis
 
 
 class UjecieKosztowInwestycyjnych(str, Enum):
@@ -176,9 +232,43 @@ class Koszty:
 
 @dataclass(frozen=True)
 class Grunt:
-    wartosc: Decimal               # z operatu
+    """Dzialka w dwoch poziomach: skad pochodzi i w jakiej formie wchodzi.
+
+    `wartosc` to zawsze wartosc z operatu. Cena rzeczywiscie zaplacona gminie
+    (po bonifikacie) siedzi osobno w `cena_nabycia`, bo art. 13 ust. 1 pkt 1
+    mowi o wartosci prawa, a nie o cenie nabycia — patrz kwestia 9.3.
+    """
+
+    wartosc: Decimal                              # z operatu
+    pochodzenie: PochodzenieGruntu
     forma: FormaGruntu
     obciazony_hipoteka: bool
+    # tylko dla dzierzawy i uzytkowania wieczystego — koszt biezacy, nie kapitalowy
+    oplata_roczna: Optional[Decimal] = None
+    # cena po bonifikacie; wymagana tylko przy odczycie alternatywnym kwestii 9.3
+    cena_nabycia: Optional[Decimal] = None
+    # tylko dla formy "lokal za grunt" — rozliczenie ceny lokalami
+    liczba_lokali_dla_gminy: int = 0
+    pum_lokali_dla_gminy: Decimal = ZERO
+
+    @property
+    def rozliczany_lokalami(self) -> bool:
+        return self.forma is FormaGruntu.LOKAL_ZA_GRUNT
+
+    @property
+    def oplata_roczna_lub_zero(self) -> Decimal:
+        return self.oplata_roczna if self.oplata_roczna is not None else ZERO
+
+    @property
+    def koszt_lokali_dla_gminy_na_m2(self) -> Decimal:
+        """Efektywny koszt gruntu na m2 lokali oddawanych gminie — rozdz. 6.
+
+        Do zestawienia z kosztem budowy metra. Jezeli gmina zada lokali wartych
+        wiecej niz dzialka, wariant jest niekorzystny i ma to byc widoczne.
+        """
+        if self.pum_lokali_dla_gminy <= ZERO:
+            return ZERO
+        return self.wartosc / self.pum_lokali_dla_gminy
 
 
 # ---------------------------------------------------------------------------
@@ -287,9 +377,18 @@ class Przelaczniki:
 
     # 10.1. Czy hybryda to jedno przedsiewziecie, czy dwa. Domyslnie dwa odrebne.
     hybryda_jako_jedno_przedsiewziecie: bool = False
-    # Grunt JST wniesiony aportem a limit gruntowy grantu z art. 13 ust. 1 pkt 1.
-    # Odczyt literalny: po aporcie grunt jest "we wladaniu inwestora". ZALOZENIE.
-    grunt_jst_liczy_sie_do_limitu_grantu: bool = True
+    # Kwestia 9.1 uzupelnienia nr 2: czy grunt nabyty w trybie "lokal za grunt"
+    # jest przychodem uslugi publicznej. Domyslnie NIE — to nabycie, a nie
+    # wniesienie przez jednostke samorzadu terytorialnego. ZALOZENIE.
+    lokal_za_grunt_jest_przychodem_uoig: bool = False
+    # Kwestia 9.2: czy wartosc prawa uzytkowania wieczystego ustanowionego przez
+    # gmine jest przychodem uslugi publicznej. Domyslnie wariant ostrozniejszy:
+    # TAK, jest przychodem. ZALOZENIE.
+    uzytkowanie_wieczyste_jest_przychodem_uoig: bool = True
+    # Kwestia 9.3: czy pasmo dotacji liczy sie od wartosci z operatu, czy od ceny
+    # po bonifikacie. Domyslnie od operatu — art. 13 ust. 1 pkt 1 mowi o wartosci
+    # prawa, nie o cenie nabycia. ZALOZENIE.
+    pasmo_liczone_od_wartosci_z_operatu: bool = True
     # Brak wzoru na rozsadny zysk w specyfikacji — patrz LUKI.md.
     metoda_rozsadnego_zysku: MetodaRozsadnegoZysku = MetodaRozsadnegoZysku.KAPITAL_ZAANGAZOWANY
     # art. 5 ust. 1 pkt 2 u.f.w. — remont i przebudowa zamiast budowy (limit czynszu 5%).
@@ -361,6 +460,18 @@ def _kwota(sekcja: Mapping[str, Any], klucz: str, sciezka: str) -> Decimal:
         return zl(sekcja[klucz])
     except (InvalidOperation, TypeError, ValueError) as exc:
         raise BladWalidacji(f"'{sciezka}.{klucz}' nie jest liczba: {sekcja[klucz]!r}") from exc
+
+
+def _kwota_opcjonalna(sekcja: Mapping[str, Any], klucz: str, sciezka: str) -> Optional[Decimal]:
+    """Kwota, ktorej brak jest dopuszczalny i znaczacy — None, nie zero.
+
+    Rozroznienie jest istotne: "nie podano oplaty rocznej" i "oplata roczna
+    wynosi zero" to dwie rozne sytuacje, a silnik nie podstawia wartosci
+    domyslnych za parametry zewnetrzne.
+    """
+    if klucz not in sekcja or sekcja[klucz] is None:
+        return None
+    return _kwota(sekcja, klucz, sciezka)
 
 
 def _calkowita(sekcja: Mapping[str, Any], klucz: str, sciezka: str) -> int:
@@ -443,6 +554,15 @@ def zbuduj(dane: Mapping[str, Any], na_dzien: Optional[_dt.date] = None) -> Wejs
     )
 
     sg = _sekcja(dane, "grunt")
+    pochodzenie_surowe = _tekst(sg, "pochodzenie", "grunt")
+    try:
+        pochodzenie = PochodzenieGruntu(pochodzenie_surowe)
+    except ValueError as exc:
+        dozwolone = ", ".join(p.value for p in PochodzenieGruntu)
+        raise BladWalidacji(
+            f"'grunt.pochodzenie' ma nieznana wartosc {pochodzenie_surowe!r}. "
+            f"Dozwolone: {dozwolone}."
+        ) from exc
     forma_surowa = _tekst(sg, "forma", "grunt")
     try:
         forma = FormaGruntu(forma_surowa)
@@ -453,8 +573,13 @@ def zbuduj(dane: Mapping[str, Any], na_dzien: Optional[_dt.date] = None) -> Wejs
         ) from exc
     grunt = Grunt(
         wartosc=_kwota(sg, "wartosc", "grunt"),
+        pochodzenie=pochodzenie,
         forma=forma,
         obciazony_hipoteka=_flaga(sg, "obciazony_hipoteka", "grunt"),
+        oplata_roczna=_kwota_opcjonalna(sg, "oplata_roczna", "grunt"),
+        cena_nabycia=_kwota_opcjonalna(sg, "cena_nabycia", "grunt"),
+        liczba_lokali_dla_gminy=int(sg.get("liczba_lokali_dla_gminy") or 0),
+        pum_lokali_dla_gminy=zl(sg.get("pum_lokali_dla_gminy") or 0),
     )
 
     ss = _sekcja(dane, "pula_spoleczna")
@@ -576,8 +701,14 @@ def zbuduj(dane: Mapping[str, Any], na_dzien: Optional[_dt.date] = None) -> Wejs
         hybryda_jako_jedno_przedsiewziecie=bool(
             spr.get("hybryda_jako_jedno_przedsiewziecie", False)
         ),
-        grunt_jst_liczy_sie_do_limitu_grantu=bool(
-            spr.get("grunt_jst_liczy_sie_do_limitu_grantu", True)
+        lokal_za_grunt_jest_przychodem_uoig=bool(
+            spr.get("lokal_za_grunt_jest_przychodem_uoig", False)
+        ),
+        uzytkowanie_wieczyste_jest_przychodem_uoig=bool(
+            spr.get("uzytkowanie_wieczyste_jest_przychodem_uoig", True)
+        ),
+        pasmo_liczone_od_wartosci_z_operatu=bool(
+            spr.get("pasmo_liczone_od_wartosci_z_operatu", True)
         ),
         metoda_rozsadnego_zysku=metoda,
         tryb_kredytu=tryb,
@@ -617,7 +748,7 @@ def waliduj(w: Wejscie, na_dzien: Optional[_dt.date] = None) -> List[Ostrzezenie
     _waliduj_kredyt(w)
     _waliduj_bonus(w)
     _waliduj_partycypacje(w, ostrzezenia)
-    _waliduj_grunt(w)
+    _waliduj_grunt(w, ostrzezenia)
     _waliduj_eksploatacje(w)
     _waliduj_parametry(w, ostrzezenia, na_dzien)
     _waliduj_przelaczniki(w, ostrzezenia)
@@ -768,19 +899,129 @@ def _waliduj_partycypacje(w: Wejscie, ostrzezenia: List[Ostrzezenie]) -> None:
         )
 
 
-def _waliduj_grunt(w: Wejscie) -> None:
-    if w.grunt.wartosc < 0:
+def _waliduj_grunt(w: Wejscie, ostrzezenia: List[Ostrzezenie]) -> None:
+    """Walidacje twarde z rozdz. 5 uzupelnienia nr 2.
+
+    Wszystkie blokuja obliczenie. Wariant niedopuszczalny nie jest ostrzezeniem —
+    policzenie go i opatrzenie uwaga bylo by podaniem uzytkownikowi liczby,
+    ktorej nie wolno mu uzyc.
+    """
+    g = w.grunt
+
+    if g.wartosc < 0:
         raise BladWalidacji("'grunt.wartosc' nie moze byc ujemna.")
-    if (
-        w.grunt.obciazony_hipoteka
-        and w.grunt.forma.wniesiony_aportem
-        and w.pula_spoleczna.kredyt.aktywny
-    ):
+
+    # 1. Forma niezgodna z pochodzeniem.
+    dozwolone = prawo.formy_dla_pochodzenia(g.pochodzenie.value)
+    if g.forma.value not in dozwolone:
         raise BladWalidacji(
-            "Grunt wniesiony aportem i obciazony hipoteka przy aktywnym kredycie SBC. "
-            "Obciazenie hipoteczne gruntu z aportu dyskwalifikuje przedsiewziecie "
-            "w sciezce finansowania zwrotnego."
+            f"Forma gruntu '{g.forma.value}' jest niedostepna przy pochodzeniu "
+            f"'{g.pochodzenie.value}'. Dla tego pochodzenia dopuszczalne sa: "
+            f"{', '.join(dozwolone)}."
         )
+
+    # 2. Aport nieruchomosci obciazonej hipoteka — wariant odpada.
+    if g.obciazony_hipoteka and g.forma.wniesiony_aportem:
+        raise BladWalidacji(
+            "Nieruchomosc wnoszona aportem jest obciazona hipoteka — wariant jest "
+            "niedopuszczalny, a nie obarczony ryzykiem. Podstawa wprost: § 12 ust. 6 "
+            "rozp. t.j. Dz.U. 2021 poz. 766, dotyczacy sciezki finansowania zwrotnego; "
+            "kalkulator blokuje ten wariant takze poza ta sciezka, bo hipoteka na gruncie "
+            "wniesionym do spolki obciaza majatek SIM niezaleznie od zrodla finansowania. "
+            "Zdejmij obciazenie albo wybierz forme nabycia."
+        )
+
+    # 3. Brak oplaty rocznej przy dzierzawie i uzytkowaniu wieczystym.
+    if g.forma.wymaga_oplaty_rocznej and g.oplata_roczna is None:
+        raise BladWalidacji(
+            f"Forma gruntu '{g.forma.value}' rozlicza sie oplata roczna, a "
+            "'grunt.oplata_roczna' nie zostala podana. Silnik nie podstawia wartosci "
+            "domyslnych — bez tej kwoty nie da sie policzyc kosztow biezacych."
+        )
+    if g.oplata_roczna is not None:
+        if g.oplata_roczna < 0:
+            raise BladWalidacji("'grunt.oplata_roczna' nie moze byc ujemna.")
+        if not g.forma.wymaga_oplaty_rocznej and g.oplata_roczna > ZERO:
+            ostrzezenia.append(
+                Ostrzezenie(
+                    kod="OPLATA_ROCZNA_BEZ_ZASTOSOWANIA",
+                    tresc=(
+                        f"Podano 'grunt.oplata_roczna' = {g.oplata_roczna:.2f} zl, ale forma "
+                        f"'{g.forma.value}' nie wiaze sie z oplata roczna. Kwota jest pomijana."
+                    ),
+                    podstawa="",
+                    tresc_potoczna=(
+                        "Wpisana opłata roczna za grunt nie jest uwzględniana — wybrana forma "
+                        "nie wiąże się z opłatami rocznymi."
+                    ),
+                    waga=Waga.POZOSTALE,
+                )
+            )
+
+    # 4. "Lokal za grunt" — rozliczenie lokalami wymaga podania, iloma.
+    if g.rozliczany_lokalami:
+        # Pochodzenie inne niz gmina jest juz odciete walidacja 1; komunikat
+        # zostaje osobno, bo to najczestsza pomylka konfiguracyjna.
+        if g.pochodzenie is not PochodzenieGruntu.GMINA:
+            raise BladWalidacji(
+                "Forma 'lokal_za_grunt' jest mozliwa wylacznie przy pochodzeniu 'gmina' — "
+                "cene rozlicza sie lokalami z gmina, nie z podmiotem prywatnym."
+            )
+        if g.liczba_lokali_dla_gminy <= 0:
+            raise BladWalidacji(
+                "Forma 'lokal_za_grunt' wymaga podania 'grunt.liczba_lokali_dla_gminy'. "
+                "Liczba i powierzchnia przekazywanych lokali sa przedmiotem uchwaly rady "
+                "gminy (ustawa z 16.12.2020, Dz.U. 2021 poz. 223), wiec sa negocjowane, "
+                "a nie domyslne."
+            )
+        if g.pum_lokali_dla_gminy <= ZERO:
+            raise BladWalidacji(
+                "Forma 'lokal_za_grunt' wymaga podania 'grunt.pum_lokali_dla_gminy' — "
+                "powierzchni uzytkowej lokali przekazywanych gminie."
+            )
+        if g.pum_lokali_dla_gminy >= w.powierzchnie.pum_laczne:
+            raise BladWalidacji(
+                f"'grunt.pum_lokali_dla_gminy' ({g.pum_lokali_dla_gminy}) nie moze siegac "
+                f"calej powierzchni przedsiewziecia ({w.powierzchnie.pum_laczne}). "
+                "Po przekazaniu lokali gminie musi zostac powierzchnia na wynajem."
+            )
+    elif g.liczba_lokali_dla_gminy or g.pum_lokali_dla_gminy > ZERO:
+        raise BladWalidacji(
+            "Lokale dla gminy podano przy formie innej niz 'lokal_za_grunt'. "
+            "Rozliczenie ceny lokalami wystepuje tylko w tym trybie."
+        )
+
+    # 5. Odczyt alternatywny kwestii 9.3 wymaga ceny po bonifikacie.
+    if not w.przelaczniki.pasmo_liczone_od_wartosci_z_operatu:
+        if g.forma is not FormaGruntu.NABYCIE_OD_GMINY:
+            ostrzezenia.append(
+                Ostrzezenie(
+                    kod="BONIFIKATA_BEZ_ZASTOSOWANIA",
+                    tresc=(
+                        "Przelacznik 'pasmo_liczone_od_wartosci_z_operatu' jest wylaczony, ale "
+                        f"forma '{g.forma.value}' nie jest sprzedaza przez gmine, wiec bonifikaty "
+                        "nie ma. Pasmo liczone od wartosci z operatu."
+                    ),
+                    podstawa="art. 13 ust. 1 pkt 1 ustawy z 8.12.2006",
+                    tresc_potoczna=(
+                        "Ustawienie o bonifikacie nie ma tu zastosowania — działka nie jest "
+                        "kupowana od gminy."
+                    ),
+                    waga=Waga.POZOSTALE,
+                )
+            )
+        elif g.cena_nabycia is None:
+            raise BladWalidacji(
+                "Przelacznik 'pasmo_liczone_od_wartosci_z_operatu' jest wylaczony, wiec pasmo "
+                "dotacji ma sie liczyc od ceny po bonifikacie — a 'grunt.cena_nabycia' nie "
+                "zostala podana. Silnik nie zgaduje wysokosci bonifikaty: podaj cene albo "
+                "wroc do odczytu domyslnego (wartosc z operatu)."
+            )
+        elif g.cena_nabycia > g.wartosc:
+            raise BladWalidacji(
+                f"'grunt.cena_nabycia' ({g.cena_nabycia}) przewyzsza wartosc z operatu "
+                f"({g.wartosc}). Bonifikata obniza cene, nie podnosi jej."
+            )
 
 
 def _waliduj_eksploatacje(w: Wejscie) -> None:
@@ -908,30 +1149,6 @@ def _waliduj_przelaczniki(w: Wejscie, ostrzezenia: List[Ostrzezenie]) -> None:
                     "Część mieszkań idzie do gminy, część na wynajem społeczny. Przyjęto, że są to dwie "
                     "odrębne inwestycje z osobnymi wnioskami. To założenie — potwierdź je w Banku, "
                     "bo zmienia wysokość dotacji."
-                ),
-                waga=Waga.ZMIENIA_KWOTE,
-            )
-        )
-    if w.grunt.forma.pochodzi_od_jst:
-        ostrzezenia.append(
-            Ostrzezenie(
-                kod="ZALOZENIE_GRUNT_JST",
-                tresc=(
-                    "Grunt pochodzi od JST. Przyjeto, ze "
-                    + (
-                        "LICZY sie do limitu gruntowego grantu (odczyt literalny: po wniesieniu "
-                        "grunt jest we wladaniu inwestora)"
-                        if pz.grunt_jst_liczy_sie_do_limitu_grantu
-                        else "NIE liczy sie do limitu gruntowego grantu"
-                    )
-                    + ". To ZALOZENIE do potwierdzenia w BGK. Niezaleznie od niego w sciezce "
-                    "grantowej grunt JST jest PRZYCHODEM inwestora i obniza koszty netto."
-                ),
-                podstawa="art. 13 ust. 1 pkt 1 oraz art. 5 ust. 9 pkt 4 ustawy z 8.12.2006",
-            
-                tresc_potoczna=(
-                    "Grunt wniesiony przez gminę zmniejsza dopuszczalną dotację. Grunt kupiony albo "
-                    "własny działa odwrotnie — warto porównać oba warianty."
                 ),
                 waga=Waga.ZMIENIA_KWOTE,
             )

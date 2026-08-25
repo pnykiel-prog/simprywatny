@@ -16,7 +16,7 @@ from typing import List, Optional, Tuple
 
 from . import prawo
 from .alokacja import Alokacja, PulaKosztow
-from .dane import FormaGruntu, Ostrzezenie, Wejscie, Waga
+from .dane import Ostrzezenie, Wejscie, Waga
 from .waluta import ZERO, bezpieczny_iloraz
 
 
@@ -30,11 +30,32 @@ class GrantPuli:
     bonus_zastosowany: bool
     podstawa_kosztowa: Decimal
     podstawa_prawna: str
+    pasmo_45: bool = True            # kanal A — czy forma gruntu odblokowuje pasmo
+    forma_gruntu: str = ""
 
     @property
     def udzial_wsparcia(self) -> Decimal:
         """Udzial wsparcia w kosztach przedsiewziecia — wejscie do tabeli art. 7c."""
         return bezpieczny_iloraz(self.kwota, self.podstawa_kosztowa)
+
+    @property
+    def grant_maksymalny_ustawowy(self) -> Decimal:
+        """Ile wynioslby grant, gdyby nic go nie ograniczalo poza stawka."""
+        return self.podstawa_kosztowa * self.stawka_nominalna
+
+    @property
+    def grant_utracony(self) -> Decimal:
+        """Roznica miedzy stawka a kwota faktyczna — szary slupek "utracone".
+
+        Rozdz. 7.3 uzupelnienia nr 2. Liczona na tej samej podstawie kosztowej,
+        wiec pokazuje skutek ograniczenia, a nie skutek zmiany calego montazu;
+        porownanie miedzy formami gruntu daje osobny widok porownawczy.
+        """
+        return max(ZERO, self.grant_maksymalny_ustawowy - self.kwota)
+
+    @property
+    def utracony_przez_forme_gruntu(self) -> bool:
+        return not self.pasmo_45 and self.grant_utracony > ZERO
 
 
 @dataclass(frozen=True)
@@ -47,19 +68,6 @@ class Granty:
     @property
     def kwota_laczna(self) -> Decimal:
         return self.spoleczna.kwota + self.komunalna.kwota
-
-
-def grunt_liczy_sie_do_limitu(w: Wejscie) -> bool:
-    """Czy wartosc gruntu podnosi limit grantu spolecznego ponad prog gruntowy.
-
-    art. 13 ust. 1 pkt 1: liczy sie grunt "bedacy we wladaniu inwestora".
-    Grunt pochodzacy od JST jest po wniesieniu we wladaniu inwestora, ale nie
-    pochodzi z jego majatku — odczyt jest sporny, wiec siedzi na przelaczniku
-    `grunt_jst_liczy_sie_do_limitu_grantu` z jawnym oznaczeniem zalozenia.
-    """
-    if w.grunt.forma.pochodzi_od_jst:
-        return w.przelaczniki.grunt_jst_liczy_sie_do_limitu_grantu
-    return True
 
 
 def _grant_spoleczny(w: Wejscie, pula: PulaKosztow, ostrzezenia: List[Ostrzezenie]) -> GrantPuli:
@@ -101,7 +109,13 @@ def _grant_spoleczny(w: Wejscie, pula: PulaKosztow, ostrzezenia: List[Ostrzezeni
             )
         )
 
-    grunt_wliczany = pula.grunt_w_podstawie if grunt_liczy_sie_do_limitu(w) else ZERO
+    # Kanal A. art. 13 ust. 1 pkt 1 pokrywa czesc ponad prog gruntowy wylacznie
+    # do wysokosci wartosci prawa wlasnosci albo uzytkowania wieczystego gruntu
+    # bedacego we wladaniu inwestora. Forma, ktora zadnego z tych praw nie daje,
+    # zatrzymuje wsparcie na progu — i to niezaleznie od wartosci dzialki, bo
+    # wartosci, ktorej inwestor nie wlada, przepis nie pozwala uwzglednic.
+    pasmo_45 = w.grunt.forma.daje_pasmo_45
+    grunt_wliczany = pula.grunt_do_pasma_w_podstawie if pasmo_45 else ZERO
     limit_gorny = koszty * stawka
     limit_gruntowy = koszty * prawo.GRANT_SPOLECZNY_PROG_GRUNTOWY + grunt_wliczany
 
@@ -115,6 +129,8 @@ def _grant_spoleczny(w: Wejscie, pula: PulaKosztow, ostrzezenia: List[Ostrzezeni
         bonus_zastosowany=bonus,
         podstawa_kosztowa=koszty,
         podstawa_prawna="art. 13 ust. 1 pkt 1 ustawy z 8.12.2006",
+        pasmo_45=pasmo_45,
+        forma_gruntu=w.grunt.forma.value,
     )
 
 
@@ -149,6 +165,7 @@ def _grant_komunalny(w: Wejscie, pula: PulaKosztow) -> GrantPuli:
         bonus_zastosowany=bonus,
         podstawa_kosztowa=koszty,
         podstawa_prawna="art. 13 ust. 1 pkt 3 lit. c w zw. z art. 5a ust. 1 ustawy z 8.12.2006",
+        forma_gruntu=w.grunt.forma.value,
     )
 
 
@@ -187,7 +204,26 @@ def build(w: Wejscie, a: Alokacja) -> Granty:
             )
             )
 
-    if a.spoleczna.aktywna and spoleczna.ograniczony_gruntem:
+    if a.spoleczna.aktywna and spoleczna.utracony_przez_forme_gruntu:
+        ostrzezenia.append(
+            Ostrzezenie(
+                kod="PASMO_SCIETE_FORMA_GRUNTU",
+                tresc=(
+                    f"Forma gruntu '{spoleczna.forma_gruntu}' scina wsparcie w puli spolecznej "
+                    f"z {spoleczna.stawka_nominalna:.0%} do "
+                    f"{prawo.GRANT_SPOLECZNY_PROG_GRUNTOWY:.0%} kosztow przedsiewziecia. "
+                    f"Na tej podstawie kosztowej to {spoleczna.grant_utracony:.2f} zl mniej."
+                ),
+                podstawa="art. 13 ust. 1 pkt 1 ustawy z 8.12.2006",
+                tresc_potoczna=(
+                    f"Wybrana forma gruntu kosztuje Cię {_zl(spoleczna.grant_utracony)} dotacji — "
+                    "dotacja zatrzymuje się na 35% zamiast 45% kosztów."
+                ),
+                waga=Waga.ZMIENIA_WERDYKT,
+            )
+        )
+
+    if a.spoleczna.aktywna and spoleczna.ograniczony_gruntem and spoleczna.pasmo_45:
         ostrzezenia.append(
             Ostrzezenie(
                 kod="GRANT_OGRANICZONY_GRUNTEM",
@@ -214,6 +250,10 @@ def build(w: Wejscie, a: Alokacja) -> Granty:
         ograniczony_limitem_hybrydy=ograniczony_hybryda,
         ostrzezenia=tuple(ostrzezenia),
     )
+
+
+def _zl(kwota: Decimal) -> str:
+    return f"{kwota:,.0f} zł".replace(",", "\u00a0")
 
 
 def _przeskaluj(g: GrantPuli, wspolczynnik: Decimal) -> GrantPuli:

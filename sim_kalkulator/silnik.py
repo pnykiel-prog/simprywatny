@@ -20,7 +20,9 @@ from . import testy_montazu as _testy
 from .alokacja import Alokacja
 from .czynsz import LimityCzynszu
 from . import prawo
+from . import grunt as _grunt
 from .dane import BladWalidacji, Ostrzezenie, TrybKredytu, Wejscie
+from .grunt import UjecieGruntu
 from .grant import Granty
 from .projekcja import Finansowanie, Projekcja
 from .rekompensata import TestRekompensaty
@@ -99,7 +101,17 @@ def kredyt_maksymalny_obslugiwalny(
         a.spoleczna.koszty_przedsiewziecia
         * w.pula_spoleczna.partycypacja.stawka_procent_kosztu_lokalu
     )
-    potrzebny = a.spoleczna.koszty_przedsiewziecia - g.spoleczna.kwota - partycypacja
+    # Wklad rzeczowy w gruncie juz pokrywa czesc kosztow, wiec kredyt nie ma
+    # czego za niego finansowac. Bez tego odjecia kredyt "doplacalby" do aportu,
+    # a wynikowy wklad gotowkowy wychodzilby ujemny.
+    rzeczowy = _projekcja.wklady_rzeczowe(w, a)
+    rzeczowy_spoleczna = rzeczowy[0][0] + rzeczowy[1][0]
+    potrzebny = (
+        a.spoleczna.koszty_przedsiewziecia
+        - g.spoleczna.kwota
+        - partycypacja
+        - rzeczowy_spoleczna
+    )
     return pelne_zlote_w_dol(
         max(ZERO, min(min(pulapy), limit_ustawowy, potrzebny))
     )
@@ -167,6 +179,7 @@ class Wynik:
     """Komplet wyniku dla jednego wariantu wejsciowego."""
 
     wejscie: Wejscie
+    grunt: UjecieGruntu
     alokacja: Alokacja
     granty: Granty
     limity_spoleczna: LimityCzynszu
@@ -179,7 +192,12 @@ class Wynik:
 
     @property
     def ostrzezenia(self) -> Tuple[Ostrzezenie, ...]:
-        return tuple(self.wejscie.ostrzezenia) + self.granty.ostrzezenia + self.rekompensata.ostrzezenia
+        return (
+            tuple(self.wejscie.ostrzezenia)
+            + self.grunt.ostrzezenia
+            + self.granty.ostrzezenia
+            + self.rekompensata.ostrzezenia
+        )
 
     @property
     def domyka_sie(self) -> bool:
@@ -205,8 +223,9 @@ class Wynik:
 
     @property
     def wklad_wlasny_na_m2(self) -> Decimal:
+        """Wklad gotowkowy na m2 PUM — to, co inwestor musi realnie wylozyc."""
         return na_m2(
-            self.finansowanie.wklad_wlasny_wymagany, self.wejscie.powierzchnie.pum_laczne
+            self.finansowanie.wklad_gotowkowy_wymagany, self.wejscie.powierzchnie.pum_laczne
         )
 
     @property
@@ -216,6 +235,7 @@ class Wynik:
             self.alokacja.spoleczna.koszty_przedsiewziecia
             - self.finansowanie.spoleczna.grant
             - self.finansowanie.spoleczna.partycypacja
+            - self.finansowanie.spoleczna.wklad_rzeczowy
         )
         return czynsz_domykajacy_bez_wkladu(
             self.wejscie, self.alokacja, self.granty,
@@ -241,7 +261,8 @@ class WynikNieobliczalny:
 
 def przelicz(w: Wejscie) -> Wynik:
     """Pelne przeliczenie. Podnosi BladWalidacji / BladObliczenia zamiast zgadywac."""
-    a = _alokacja.build(w)
+    u = _grunt.rozstrzygnij(w)
+    a = _alokacja.build(w, u)
     g = _grant.build(w, a)
 
     kredyt_aktywny = w.pula_spoleczna.kredyt.aktywny and a.spoleczna.aktywna
@@ -272,6 +293,7 @@ def przelicz(w: Wejscie) -> Wynik:
 
     return Wynik(
         wejscie=w,
+        grunt=u,
         alokacja=a,
         granty=g,
         limity_spoleczna=limity_spoleczna,

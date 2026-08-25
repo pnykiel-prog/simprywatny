@@ -24,6 +24,7 @@ znaczeniu, ktorego angielskie "compensation" nie oddaje.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import Tuple
 
@@ -134,6 +135,316 @@ PROG_TOLERANCJI_NADWYZKI_KREDYT = Decimal("0.20")
 GRUNT_APORT_LIMIT_W_KOSZTACH_KREDYT = Decimal("0.20")
 
 # --------------------------------------------------------------------------
+# 3.6. Grunt — matryca skutkow (uzupelnienie nr 2 do specyfikacji, rozdz. 3)
+# --------------------------------------------------------------------------
+#
+# Grunt dziala na wynik czterema niezaleznymi kanalami, ktore nie sumuja sie
+# w jeden parametr:
+#   A — pasmo dotacji: czy wsparcie moze przekroczyc prog gruntowy i siegnac
+#       limitu podstawowego              (art. 13 ust. 1 pkt 1 u.f.w.),
+#   B — koszt przedsiewziecia: czy i w jakiej wysokosci wartosc gruntu wchodzi
+#       do podstawy                      (art. 5 ust. 7 pkt 7 i ust. 8 u.f.w.;
+#                                         § 12 ust. 7 rozp. 766),
+#   C — przychod uslugi publicznej: czy grunt obniza koszty netto, a przez to
+#       dopuszczalna rekompensate        (art. 5 ust. 9 pkt 4 u.f.w.),
+#   D — zapotrzebowanie na gotowke: czy wklad inwestora jest pieniezny,
+#       czy rzeczowy                     (poza przepisem — klasyfikacja modelu).
+# Kanal piaty, poza obliczeniami: aport gminy czyni ja wspolnikiem spolki.
+
+# Oznaczenia pewnosci wg rozdz. 3 uzupelnienia nr 2.
+PEWNOSC_ZRODLO = "Z"             # odczytane wprost w przepisie
+PEWNOSC_WNIOSEK = "W"            # wniosek z odczytanych przepisow
+PEWNOSC_DO_POTWIERDZENIA = "?"   # wymaga potwierdzenia w BGK
+
+# Pochodzenie dzialki — poziom 1 pytania do uzytkownika (rozdz. 2).
+POCHODZENIE_INWESTOR = "inwestor"
+POCHODZENIE_RYNEK_PRYWATNY = "rynek_prywatny"
+POCHODZENIE_GMINA = "gmina"
+
+# Rodzaj wydatku na grunt (kanal D). Nie jest to kategoria ustawowa, tylko
+# klasyfikacja na potrzeby montazu — decyduje o tym, ile gotowki trzeba wylozyc.
+WYDATEK_PELNY = "pelny"                            # cena placona w pieniadzu
+WYDATEK_BRAK = "brak"                              # wklad rzeczowy, bez gotowki
+WYDATEK_PONIESIONY_WCZESNIEJ = "poniesiony_wczesniej"
+WYDATEK_OPLATY_ROCZNE = "oplaty_roczne"            # dzierzawa, uzytkowanie wieczyste
+WYDATEK_LOKALE = "lokale"                          # rozliczenie lokalami
+
+
+@dataclass(frozen=True)
+class SkutkiFormyGruntu:
+    """Jeden wiersz matrycy skutkow z rozdz. 3 uzupelnienia nr 2.
+
+    Pola z sufiksem `_pewnosc` niosa oznaczenie zrodla (Z / W / ?), zeby arkusz
+    i interfejs mogly pokazac, ktory skutek jest odczytany w przepisie, a ktory
+    jest wnioskiem albo zalozeniem. `przelacznik_przychodu` wskazuje przelacznik
+    rozstrzygajacy kanal C tam, gdzie odczyt nie jest przesadzony (kwestie 9.1 i 9.2).
+    """
+
+    forma: str
+    pochodzenie: str
+    # kanal A
+    pasmo_45: bool
+    pasmo_45_pewnosc: str
+    # kanal B
+    wartosc_w_kosztach: bool
+    limit_aportowy: bool          # § 12 ust. 7 rozp. 766 — tylko sciezka kredytowa
+    wartosc_w_kosztach_pewnosc: str
+    # kanal C
+    przychod_uoig: bool           # wartosc domyslna; przelacznik moze ja odwrocic
+    przychod_uoig_pewnosc: str
+    przelacznik_przychodu: str
+    # kanal D
+    wydatek: str
+    # kanal E
+    gmina_wspolnikiem: bool
+    # warstwa interakcji — rozdz. 7.2
+    etykieta: str
+    podpis: str
+    podstawa: str
+
+    @property
+    def wnoszony_aportem(self) -> bool:
+        """Aport jest wkladem niepienieznym — § 12 ust. 6 i 7 rozp. 766."""
+        return self.limit_aportowy
+
+    @property
+    def z_oplata_roczna(self) -> bool:
+        return self.wydatek == WYDATEK_OPLATY_ROCZNE
+
+    @property
+    def wymaga_potwierdzenia(self) -> bool:
+        return PEWNOSC_DO_POTWIERDZENIA in (
+            self.pasmo_45_pewnosc,
+            self.wartosc_w_kosztach_pewnosc,
+            self.przychod_uoig_pewnosc,
+        )
+
+
+# Kolejnosc wierszy odpowiada matrycy z rozdz. 3 i jest kolejnoscia prezentacji
+# w interfejsie oraz w widoku porownawczym form gruntu.
+MATRYCA_GRUNTU: Tuple[SkutkiFormyGruntu, ...] = (
+    SkutkiFormyGruntu(
+        forma="aport_inwestora",
+        pochodzenie=POCHODZENIE_INWESTOR,
+        pasmo_45=True, pasmo_45_pewnosc=PEWNOSC_ZRODLO,
+        wartosc_w_kosztach=True, limit_aportowy=True,
+        wartosc_w_kosztach_pewnosc=PEWNOSC_ZRODLO,
+        przychod_uoig=False, przychod_uoig_pewnosc=PEWNOSC_WNIOSEK,
+        przelacznik_przychodu="",
+        wydatek=WYDATEK_BRAK,
+        gmina_wspolnikiem=False,
+        etykieta="Wnoszę działkę aportem",
+        podpis=(
+            "Nie wydajesz gotówki na grunt, ale w ścieżce kredytowej do kosztów "
+            "wejdzie tylko 20% wartości działki."
+        ),
+        podstawa="art. 13 ust. 1 pkt 1 ustawy z 8.12.2006; § 12 ust. 7 rozp. t.j. Dz.U. 2021 poz. 766",
+    ),
+    SkutkiFormyGruntu(
+        forma="spolka_wlascicielem",
+        pochodzenie=POCHODZENIE_INWESTOR,
+        pasmo_45=True, pasmo_45_pewnosc=PEWNOSC_ZRODLO,
+        wartosc_w_kosztach=True, limit_aportowy=False,
+        wartosc_w_kosztach_pewnosc=PEWNOSC_WNIOSEK,
+        przychod_uoig=False, przychod_uoig_pewnosc=PEWNOSC_WNIOSEK,
+        przelacznik_przychodu="",
+        wydatek=WYDATEK_PONIESIONY_WCZESNIEJ,
+        gmina_wspolnikiem=False,
+        etykieta="Spółka już jest właścicielem",
+        podpis=(
+            "Działka jest w spółce, wydatek został poniesiony wcześniej. "
+            "Pełna wartość wchodzi do kosztów i podnosi dotację."
+        ),
+        podstawa="art. 13 ust. 1 pkt 1 ustawy z 8.12.2006; art. 5 ust. 7 pkt 7 i ust. 8",
+    ),
+    SkutkiFormyGruntu(
+        forma="nabycie_prywatne",
+        pochodzenie=POCHODZENIE_RYNEK_PRYWATNY,
+        pasmo_45=True, pasmo_45_pewnosc=PEWNOSC_ZRODLO,
+        wartosc_w_kosztach=True, limit_aportowy=False,
+        wartosc_w_kosztach_pewnosc=PEWNOSC_WNIOSEK,
+        przychod_uoig=False, przychod_uoig_pewnosc=PEWNOSC_WNIOSEK,
+        przelacznik_przychodu="",
+        wydatek=WYDATEK_PELNY,
+        gmina_wspolnikiem=False,
+        etykieta="Kupuję od podmiotu prywatnego",
+        podpis=(
+            "Zwykłe nabycie za gotówkę. Pełna wartość wchodzi do kosztów, "
+            "bez skutków ubocznych."
+        ),
+        podstawa="art. 13 ust. 1 pkt 1 ustawy z 8.12.2006; art. 5 ust. 7 pkt 7 i ust. 8",
+    ),
+    SkutkiFormyGruntu(
+        forma="nabycie_od_gminy",
+        pochodzenie=POCHODZENIE_GMINA,
+        pasmo_45=True, pasmo_45_pewnosc=PEWNOSC_ZRODLO,
+        wartosc_w_kosztach=True, limit_aportowy=False,
+        wartosc_w_kosztach_pewnosc=PEWNOSC_WNIOSEK,
+        przychod_uoig=False, przychod_uoig_pewnosc=PEWNOSC_WNIOSEK,
+        przelacznik_przychodu="",
+        wydatek=WYDATEK_PELNY,
+        gmina_wspolnikiem=False,
+        etykieta="Gmina sprzedaje działkę",
+        podpis=(
+            "Zwykłe nabycie. Podnosi zapotrzebowanie na gotówkę, "
+            "ale nie ma skutków ubocznych."
+        ),
+        podstawa="art. 13 ust. 1 pkt 1 ustawy z 8.12.2006; art. 5 ust. 7 pkt 7 i ust. 8",
+    ),
+    SkutkiFormyGruntu(
+        forma="lokal_za_grunt",
+        pochodzenie=POCHODZENIE_GMINA,
+        pasmo_45=True, pasmo_45_pewnosc=PEWNOSC_WNIOSEK,
+        wartosc_w_kosztach=True, limit_aportowy=False,
+        wartosc_w_kosztach_pewnosc=PEWNOSC_WNIOSEK,
+        przychod_uoig=False, przychod_uoig_pewnosc=PEWNOSC_DO_POTWIERDZENIA,
+        przelacznik_przychodu="lokal_za_grunt_jest_przychodem_uoig",
+        wydatek=WYDATEK_LOKALE,
+        gmina_wspolnikiem=False,
+        etykieta="Lokal za grunt",
+        podpis=(
+            "Płacisz gminie lokalami zamiast pieniędzmi. Nie wydajesz gotówki, "
+            "ale część mieszkań nie będzie Twoja."
+        ),
+        podstawa=(
+            "ustawa z 16.12.2020, Dz.U. 2021 poz. 223; art. 13 ust. 1 pkt 1 ustawy z 8.12.2006"
+        ),
+    ),
+    SkutkiFormyGruntu(
+        forma="aport_gminy",
+        pochodzenie=POCHODZENIE_GMINA,
+        pasmo_45=True, pasmo_45_pewnosc=PEWNOSC_WNIOSEK,
+        wartosc_w_kosztach=True, limit_aportowy=True,
+        wartosc_w_kosztach_pewnosc=PEWNOSC_WNIOSEK,
+        przychod_uoig=True, przychod_uoig_pewnosc=PEWNOSC_ZRODLO,
+        przelacznik_przychodu="",
+        wydatek=WYDATEK_BRAK,
+        gmina_wspolnikiem=True,
+        etykieta="Gmina wnosi aportem",
+        podpis=(
+            "Gmina obejmuje udziały w spółce i staje się wspólnikiem. "
+            "Zmniejsza też dopuszczalną pomoc publiczną."
+        ),
+        podstawa="art. 5 ust. 9 pkt 4 ustawy z 8.12.2006; § 12 ust. 7 rozp. t.j. Dz.U. 2021 poz. 766",
+    ),
+    SkutkiFormyGruntu(
+        forma="uzytkowanie_wieczyste",
+        pochodzenie=POCHODZENIE_GMINA,
+        pasmo_45=True, pasmo_45_pewnosc=PEWNOSC_ZRODLO,
+        wartosc_w_kosztach=True, limit_aportowy=False,
+        wartosc_w_kosztach_pewnosc=PEWNOSC_DO_POTWIERDZENIA,
+        przychod_uoig=True, przychod_uoig_pewnosc=PEWNOSC_DO_POTWIERDZENIA,
+        przelacznik_przychodu="uzytkowanie_wieczyste_jest_przychodem_uoig",
+        wydatek=WYDATEK_OPLATY_ROCZNE,
+        gmina_wspolnikiem=False,
+        etykieta="Użytkowanie wieczyste",
+        podpis="Płacisz opłaty roczne zamiast ceny. Zachowujesz pełną dotację.",
+        podstawa="art. 13 ust. 1 pkt 1 ustawy z 8.12.2006; art. 5 ust. 9 pkt 4",
+    ),
+    SkutkiFormyGruntu(
+        forma="dzierzawa",
+        pochodzenie=POCHODZENIE_GMINA,
+        pasmo_45=False, pasmo_45_pewnosc=PEWNOSC_ZRODLO,
+        wartosc_w_kosztach=False, limit_aportowy=False,
+        wartosc_w_kosztach_pewnosc=PEWNOSC_WNIOSEK,
+        przychod_uoig=False, przychod_uoig_pewnosc=PEWNOSC_WNIOSEK,
+        przelacznik_przychodu="",
+        wydatek=WYDATEK_OPLATY_ROCZNE,
+        gmina_wspolnikiem=False,
+        etykieta="Dzierżawa",
+        podpis="Najtańsze wejście, ale dotacja spada z 45% do 35%. Sprawdź, czy się opłaca.",
+        podstawa="art. 13 ust. 1 pkt 1 ustawy z 8.12.2006",
+    ),
+)
+
+SKUTKI_GRUNTU = {wiersz.forma: wiersz for wiersz in MATRYCA_GRUNTU}
+
+# art. 13 ust. 1 pkt 1 u.f.w. mowi o wartosci prawa WLASNOSCI albo UZYTKOWANIA
+# WIECZYSTEGO nieruchomosci gruntowej bedacej we wladaniu inwestora. Dzierzawa
+# i uzyczenie nie sa zadnym z tych praw, wiec nie odblokowuja pasma ponad prog
+# gruntowy — dotacja zatrzymuje sie na GRANT_SPOLECZNY_PROG_GRUNTOWY.
+FORMY_DAJACE_PASMO_45 = frozenset(w.forma for w in MATRYCA_GRUNTU if w.pasmo_45)
+
+# § 12 ust. 6 i 7 rozp. 766 — formy bedace wkladem niepienieznym.
+FORMY_APORTOWE = frozenset(w.forma for w in MATRYCA_GRUNTU if w.limit_aportowy)
+
+# Formy, przy ktorych rozliczenie z gmina ma postac oplaty rocznej, a nie ceny.
+FORMY_Z_OPLATA_ROCZNA = frozenset(w.forma for w in MATRYCA_GRUNTU if w.z_oplata_roczna)
+
+# Poziom 2 pytania do uzytkownika — zestaw form dopuszczalnych dla pochodzenia.
+POCHODZENIA_GRUNTU: Tuple[str, ...] = (
+    POCHODZENIE_INWESTOR,
+    POCHODZENIE_RYNEK_PRYWATNY,
+    POCHODZENIE_GMINA,
+)
+
+FORMY_WG_POCHODZENIA = {
+    pochodzenie: tuple(w.forma for w in MATRYCA_GRUNTU if w.pochodzenie == pochodzenie)
+    for pochodzenie in POCHODZENIA_GRUNTU
+}
+
+ETYKIETY_POCHODZENIA = {
+    POCHODZENIE_INWESTOR: "Inwestor już ma działkę",
+    POCHODZENIE_RYNEK_PRYWATNY: "Działkę trzeba kupić od podmiotu prywatnego",
+    POCHODZENIE_GMINA: "Działka należy do gminy",
+}
+
+
+def skutki_gruntu(forma: str) -> SkutkiFormyGruntu:
+    """Wiersz matrycy skutkow dla danej formy wniesienia gruntu."""
+    try:
+        return SKUTKI_GRUNTU[str(forma)]
+    except KeyError as exc:
+        dozwolone = ", ".join(SKUTKI_GRUNTU)
+        raise ValueError(
+            "Nieznana forma gruntu: %r (dopuszczalne: %s)" % (forma, dozwolone)
+        ) from exc
+
+
+def formy_dla_pochodzenia(pochodzenie: str) -> Tuple[str, ...]:
+    """Formy wniesienia dopuszczalne przy danym pochodzeniu dzialki."""
+    try:
+        return FORMY_WG_POCHODZENIA[str(pochodzenie)]
+    except KeyError as exc:
+        dozwolone = ", ".join(POCHODZENIA_GRUNTU)
+        raise ValueError(
+            "Nieznane pochodzenie gruntu: %r (dopuszczalne: %s)" % (pochodzenie, dozwolone)
+        ) from exc
+
+
+# Zalozenia z rozdz. 9 uzupelnienia nr 2 — pozycje oznaczone [?] w matrycy.
+# Kazde siedzi na przelaczniku w `dane.Przelaczniki`; wartosc domyslna jest
+# ZALOZENIEM, nie odczytem przepisu, i musi byc widoczna w arkuszu.
+ZALOZENIA_GRUNTOWE_DO_POTWIERDZENIA = (
+    (
+        "9.1",
+        "lokal_za_grunt_jest_przychodem_uoig",
+        False,
+        "Czy wartosc gruntu nabytego w trybie 'lokal za grunt' jest przychodem uslugi "
+        "publicznej. Przyjeto, ze NIE jest — transakcja jest nabyciem, a nie wniesieniem "
+        "przez jednostke samorzadu terytorialnego.",
+        "art. 5 ust. 9 pkt 4 ustawy z 8.12.2006",
+    ),
+    (
+        "9.2",
+        "uzytkowanie_wieczyste_jest_przychodem_uoig",
+        True,
+        "Czy wartosc prawa uzytkowania wieczystego ustanowionego przez gmine jest "
+        "przychodem uslugi publicznej. Przyjeto wariant ostrozniejszy: JEST przychodem.",
+        "art. 5 ust. 9 pkt 4 ustawy z 8.12.2006",
+    ),
+    (
+        "9.3",
+        "pasmo_liczone_od_wartosci_z_operatu",
+        True,
+        "Czy bonifikata przy sprzedazy gruntu przez gmine obniza wartosc przyjmowana do "
+        "pasma dotacji. Przyjeto, ze NIE — art. 13 ust. 1 pkt 1 mowi o wartosci prawa, "
+        "nie o cenie nabycia, wiec pasmo liczy sie od wartosci z operatu.",
+        "art. 13 ust. 1 pkt 1 ustawy z 8.12.2006",
+    ),
+)
+
+# --------------------------------------------------------------------------
 # 3.7. Standardy techniczne — rozp. 457
 # --------------------------------------------------------------------------
 
@@ -169,6 +480,27 @@ def limit_czynszu_art_7c(udzial_wsparcia: Decimal, remont_i_przebudowa: bool = F
         if udzial_wsparcia >= prog:
             return limit
     raise AssertionError("Tabela art. 7c nie pokrywa wartosci %s" % udzial_wsparcia)
+
+
+def grunt_aport_maksymalny_w_kosztach(koszty_bez_gruntu: Decimal) -> Decimal:
+    """Maksymalna wartosc gruntu z aportu zaliczalna do kosztow przedsiewziecia.
+
+    § 12 ust. 7 rozp. 766: wartosc gruntu wniesionego jako wklad niepienienzy
+    zalicza sie do kosztow przedsiewziecia do wysokosci GRUNT_APORT_LIMIT_W_KOSZTACH_KREDYT
+    calkowitych kosztow przedsiewziecia. Warunek jest samozwrotny, bo wartosc gruntu
+    jest skladnikiem tych kosztow. Model rozwiazuje go tak, zeby udzial gruntu
+    w KONCOWEJ podstawie wyszedl dokladnie na limicie:
+
+        u = limit * (K_bez_gruntu + u)   =>   u = K_bez_gruntu * limit / (1 - limit)
+
+    Odczyt alternatywny — limit liczony od kosztow z pelna, nieobcieta wartoscia
+    gruntu — daje kwote wyzsza i udzial ponizej limitu w podstawie faktycznie
+    przyjetej. Patrz LUKI.md.
+    """
+    if koszty_bez_gruntu <= 0:
+        return Decimal(0)
+    limit = GRUNT_APORT_LIMIT_W_KOSZTACH_KREDYT
+    return koszty_bez_gruntu * limit / (Decimal(1) - limit)
 
 
 def prog_tolerancji_nadwyzki(sciezka: str) -> Decimal:

@@ -34,29 +34,28 @@ def puli(wynik, nazwa):
 
 
 class TestAsymetriaGruntu:
-    """Grunt inwestora podnosi podstawe, grunt gminy ja obniza."""
+    """Kanal C — grunt inwestora podnosi podstawe, grunt gminy ja obniza."""
 
-    def test_grunt_jst_jako_przychod_obniza_kn(self):
-        # Dwa identyczne warianty roznia sie WYLACZNIE forma wniesienia gruntu.
-        # Sciezka grantowa w obu pulach — kredyt wylaczony, zeby izolowac efekt.
-        wspolne_zmiany = dict(
-            pula_spoleczna__kredyt__udzial_docelowy=0.0,
-            przelaczniki_grunt=None,
-        )
+    def test_aport_gminy_obniza_kn_wzgledem_aportu_inwestora(self):
+        # Dwa warianty identyczne poza forma gruntu — rozdz. 8 uzupelnienia nr 2.
         _, inwestora = policz(
-            grunt__forma="wlasnosc_inwestora",
+            grunt__pochodzenie="inwestor",
+            grunt__forma="aport_inwestora",
             pula_spoleczna__kredyt__udzial_docelowy=0.0,
         )
-        _, jst = policz(
-            grunt__forma="aport_jst",
+        _, gminy = policz(
+            grunt__pochodzenie="gmina",
+            grunt__forma="aport_gminy",
             pula_spoleczna__kredyt__udzial_docelowy=0.0,
         )
-        assert jst.spoleczna.kn < inwestora.spoleczna.kn
-        assert jst.komunalna.kn < inwestora.komunalna.kn
+        assert gminy.spoleczna.kn < inwestora.spoleczna.kn
+        assert gminy.komunalna.kn < inwestora.komunalna.kn
+        assert gminy.spoleczna.dopuszczalna < inwestora.spoleczna.dopuszczalna
 
     def test_grunt_inwestora_wchodzi_jako_koszt(self):
         _, wynik = policz(
-            grunt__forma="wlasnosc_inwestora",
+            grunt__pochodzenie="inwestor",
+            grunt__forma="spolka_wlascicielem",
             pula_spoleczna__kredyt__udzial_docelowy=0.0,
         )
         rok1 = wynik.spoleczna.lata[0]
@@ -64,9 +63,10 @@ class TestAsymetriaGruntu:
         assert rok1.grunt_jako_przychod == D("0")
         assert "art. 5 ust. 7 pkt 7" in wynik.spoleczna.grunt_ujecie
 
-    def test_grunt_jst_wchodzi_jako_przychod(self):
+    def test_grunt_gminy_wchodzi_jako_przychod(self):
         _, wynik = policz(
-            grunt__forma="aport_jst",
+            grunt__pochodzenie="gmina",
+            grunt__forma="aport_gminy",
             pula_spoleczna__kredyt__udzial_docelowy=0.0,
         )
         rok1 = wynik.spoleczna.lata[0]
@@ -78,44 +78,89 @@ class TestAsymetriaGruntu:
         # Grunt przesuwa sie ze strony kosztowej na przychodowa, wiec KN spada
         # o dwukrotnosc jego wartosci (dyskonto roku 1 = 1).
         _, inwestora = policz(
-            grunt__forma="wlasnosc_inwestora", pula_spoleczna__kredyt__udzial_docelowy=0.0
+            grunt__pochodzenie="inwestor",
+            grunt__forma="aport_inwestora",
+            pula_spoleczna__kredyt__udzial_docelowy=0.0,
         )
-        _, jst = policz(grunt__forma="aport_jst", pula_spoleczna__kredyt__udzial_docelowy=0.0)
+        _, gminy = policz(
+            grunt__pochodzenie="gmina",
+            grunt__forma="aport_gminy",
+            pula_spoleczna__kredyt__udzial_docelowy=0.0,
+        )
         grunt_puli = inwestora.spoleczna.lata[0].grunt_jako_koszt
-        roznica = inwestora.spoleczna.kn - jst.spoleczna.kn
+        roznica = inwestora.spoleczna.kn - gminy.spoleczna.kn
         assert abs(roznica - grunt_puli * 2) < D("0.01")
 
-    def test_lokal_za_grunt_traktowany_jak_grunt_jst(self):
+    def test_lokal_za_grunt_domyslnie_nie_jest_przychodem(self):
+        # Kwestia 9.1 — odczyt domyslny: nabycie, a nie wniesienie przez JST.
         _, wynik = policz(
-            grunt__forma="lokal_za_grunt", pula_spoleczna__kredyt__udzial_docelowy=0.0
+            grunt__pochodzenie="gmina",
+            grunt__forma="lokal_za_grunt",
+            grunt__liczba_lokali_dla_gminy=6,
+            grunt__pum_lokali_dla_gminy=300.0,
+            pula_spoleczna__kredyt__udzial_docelowy=0.0,
+        )
+        assert wynik.spoleczna.lata[0].grunt_jako_przychod == D("0")
+        assert wynik.spoleczna.lata[0].grunt_jako_koszt > D("0")
+
+    def test_przelacznik_91_czyni_lokal_za_grunt_przychodem(self):
+        _, wynik = policz(
+            grunt__pochodzenie="gmina",
+            grunt__forma="lokal_za_grunt",
+            grunt__liczba_lokali_dla_gminy=6,
+            grunt__pum_lokali_dla_gminy=300.0,
+            przelaczniki__lokal_za_grunt_jest_przychodem_uoig=True,
+            pula_spoleczna__kredyt__udzial_docelowy=0.0,
         )
         assert wynik.spoleczna.lata[0].grunt_jako_przychod > D("0")
 
+    def test_uzytkowanie_wieczyste_domyslnie_jest_przychodem(self):
+        # Kwestia 9.2 — przyjeto wariant ostrozniejszy.
+        _, wynik = policz(
+            grunt__pochodzenie="gmina",
+            grunt__forma="uzytkowanie_wieczyste",
+            grunt__oplata_roczna=150000.0,
+            pula_spoleczna__kredyt__udzial_docelowy=0.0,
+        )
+        assert wynik.spoleczna.lata[0].grunt_jako_przychod > D("0")
 
-class TestGruntWSciezceKredytowej:
-    """§ 12 ust. 7 rozp. 766 — aport jako koszt, ale tylko do 20% kosztow."""
-
-    def test_aport_ograniczony_do_20_procent_kosztow(self):
-        _, wynik = policz(grunt__forma="aport_inwestora", grunt__wartosc=12000000.0)
-        rok1 = wynik.spoleczna.lata[0]
-        pulap = wynik.spoleczna.lata[0].grunt_jako_koszt
-        assert "§ 12 ust. 7" in wynik.spoleczna.grunt_ujecie
-        assert "obcieto" in wynik.spoleczna.grunt_ujecie
-        # Uznany koszt nie przekracza 20% kosztow przedsiewziecia puli.
-        w, _ = policz(grunt__forma="aport_inwestora", grunt__wartosc=12000000.0)
-        a = alokacja.build(w)
-        assert pulap == a.spoleczna.koszty_przedsiewziecia * D("0.20")
-
-    def test_maly_aport_miesci_sie_w_limicie(self):
-        _, wynik = policz(grunt__forma="aport_inwestora", grunt__wartosc=1000000.0)
-        assert "obcieto" not in wynik.spoleczna.grunt_ujecie
-
-    def test_grunt_jst_w_sciezce_kredytowej_jest_kosztem_nie_przychodem(self):
-        # W sciezce kredytowej regula z art. 5 ust. 9 pkt 4 nie ma zastosowania —
-        # § 12 ust. 7 traktuje kazdy aport jako koszt limitowany.
-        _, wynik = policz(grunt__forma="aport_jst", grunt__wartosc=1000000.0)
-        assert wynik.spoleczna.lata[0].grunt_jako_koszt > D("0")
+    def test_przelacznik_92_odwraca_uzytkowanie_wieczyste(self):
+        _, wynik = policz(
+            grunt__pochodzenie="gmina",
+            grunt__forma="uzytkowanie_wieczyste",
+            grunt__oplata_roczna=150000.0,
+            przelaczniki__uzytkowanie_wieczyste_jest_przychodem_uoig=False,
+            pula_spoleczna__kredyt__udzial_docelowy=0.0,
+        )
         assert wynik.spoleczna.lata[0].grunt_jako_przychod == D("0")
+        assert wynik.spoleczna.lata[0].grunt_jako_koszt > D("0")
+
+    def test_dzierzawa_obciaza_koszty_biezace_a_nie_kapitalowe(self):
+        _, wynik = policz(
+            grunt__pochodzenie="gmina",
+            grunt__forma="dzierzawa",
+            grunt__oplata_roczna=150000.0,
+            pula_spoleczna__kredyt__udzial_docelowy=0.0,
+        )
+        rok1 = wynik.spoleczna.lata[0]
+        assert rok1.grunt_jako_koszt == D("0")
+        assert rok1.grunt_jako_przychod == D("0")
+        assert "oplata roczna" in wynik.spoleczna.grunt_ujecie
+
+    def test_oplata_dzierzawna_podnosi_koszty_biezace(self):
+        bez = policz(
+            grunt__pochodzenie="gmina",
+            grunt__forma="dzierzawa",
+            grunt__oplata_roczna=0.0,
+            pula_spoleczna__kredyt__udzial_docelowy=0.0,
+        )[1]
+        z_oplata = policz(
+            grunt__pochodzenie="gmina",
+            grunt__forma="dzierzawa",
+            grunt__oplata_roczna=150000.0,
+            pula_spoleczna__kredyt__udzial_docelowy=0.0,
+        )[1]
+        assert z_oplata.spoleczna.lata[0].koszty_biezace > bez.spoleczna.lata[0].koszty_biezace
 
 
 class TestKosztyNetto:

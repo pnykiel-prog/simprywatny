@@ -67,7 +67,10 @@ def test_montazu(w: Wejscie, fin: Finansowanie) -> Werdykt:
     inwestora jest opcjonalnym punktem odniesienia i nigdy nie blokuje
     obliczenia — brak deklaracji nie jest porazka testu.
     """
-    wymagany = fin.wklad_wlasny_wymagany
+    # Test pyta o pieniadze, wiec wynikiem jest wklad GOTOWKOWY. Grunt wniesiony
+    # aportem albo prawo ustanowione przez gmine domyka koszty rzeczowo i nie
+    # wymaga wylozenia zlotowki — kanal D w `grunt.py`.
+    wymagany = fin.wklad_gotowkowy_wymagany
     udzial = bezpieczny_iloraz(wymagany, fin.koszty_laczne)
     dostepny = w.inwestor.dostepny_wklad_wlasny
 
@@ -79,6 +82,12 @@ def test_montazu(w: Wejscie, fin: Finansowanie) -> Werdykt:
         "Wymagany wklad wlasny": _zl(wymagany),
         "Udzial wkladu w kosztach": f"{udzial:.1%}",
     }
+    if fin.wklad_rzeczowy_inwestora_laczny > ZERO:
+        szczegoly["Wklad rzeczowy inwestora (grunt)"] = _zl(
+            fin.wklad_rzeczowy_inwestora_laczny
+        )
+    if fin.wklad_rzeczowy_gminy_laczny > ZERO:
+        szczegoly["Wklad rzeczowy gminy (grunt)"] = _zl(fin.wklad_rzeczowy_gminy_laczny)
 
     if dostepny is None:
         return Werdykt(

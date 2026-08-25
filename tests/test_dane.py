@@ -9,6 +9,7 @@ from sim_kalkulator.dane import (
     BladWalidacji,
     FormaGruntu,
     MetodaRozsadnegoZysku,
+    PochodzenieGruntu,
     zbuduj,
 )
 
@@ -23,7 +24,8 @@ class TestWczytanieWzorcowego:
     def test_wzorcowy_przechodzi_walidacje(self):
         w = wspolne.wejscie()
         assert w.powierzchnie.pum_laczne == Decimal("3000.0")
-        assert w.grunt.forma is FormaGruntu.WLASNOSC_INWESTORA
+        assert w.grunt.forma is FormaGruntu.NABYCIE_OD_GMINY
+        assert w.grunt.pochodzenie is PochodzenieGruntu.GMINA
         assert w.przelaczniki.hybryda_jako_jedno_przedsiewziecie is False
 
     def test_podzial_pum_wg_glownego_pokretla(self):
@@ -201,25 +203,139 @@ class TestPartycypacja:
 
 
 class TestGrunt:
-    def test_aport_z_hipoteka_przy_kredycie_dyskwalifikuje(self):
-        with pytest.raises(BladWalidacji, match="hipoteka"):
-            wspolne.wejscie(grunt__forma="aport_jst", grunt__obciazony_hipoteka=True)
+    """Walidacje twarde z rozdz. 5 uzupelnienia nr 2 — wszystkie blokuja obliczenie."""
 
-    def test_aport_z_hipoteka_bez_kredytu_przechodzi(self):
+    def test_forma_niezgodna_z_pochodzeniem_to_blad(self):
+        with pytest.raises(BladWalidacji, match="niedostepna przy pochodzeniu"):
+            wspolne.wejscie(grunt__pochodzenie="inwestor", grunt__forma="dzierzawa")
+
+    def test_lokal_za_grunt_wymaga_pochodzenia_od_gminy(self):
+        with pytest.raises(BladWalidacji, match="niedostepna przy pochodzeniu"):
+            wspolne.wejscie(
+                grunt__pochodzenie="rynek_prywatny", grunt__forma="lokal_za_grunt"
+            )
+
+    def test_aport_z_hipoteka_dyskwalifikuje_wariant(self):
+        # § 12 ust. 6 rozp. 766 — warunek zerojedynkowy, nie ostrzezenie.
+        with pytest.raises(BladWalidacji, match="hipoteka"):
+            wspolne.wejscie(
+                grunt__pochodzenie="inwestor",
+                grunt__forma="aport_inwestora",
+                grunt__obciazony_hipoteka=True,
+            )
+
+    def test_aport_z_hipoteka_odpada_takze_bez_kredytu(self):
+        with pytest.raises(BladWalidacji, match="hipoteka"):
+            wspolne.wejscie(
+                grunt__pochodzenie="gmina",
+                grunt__forma="aport_gminy",
+                grunt__obciazony_hipoteka=True,
+                pula_spoleczna__kredyt__udzial_docelowy=0.0,
+            )
+
+    def test_nabycie_z_hipoteka_przechodzi(self):
+        # Zakaz dotyczy wkladu niepienieznego, nie nabycia za gotowke.
         w = wspolne.wejscie(
-            grunt__forma="aport_jst",
+            grunt__pochodzenie="rynek_prywatny",
+            grunt__forma="nabycie_prywatne",
             grunt__obciazony_hipoteka=True,
-            pula_spoleczna__kredyt__udzial_docelowy=0.0,
         )
         assert w.grunt.obciazony_hipoteka is True
 
     def test_nieznana_forma_gruntu_to_wyjatek(self):
         with pytest.raises(BladWalidacji, match="nieznana wartosc"):
-            wspolne.wejscie(grunt__forma="dzierzawa")
+            wspolne.wejscie(grunt__forma="uzyczenie")
 
-    def test_grunt_jst_daje_ostrzezenie_o_zalozeniu(self):
-        w = wspolne.wejscie(grunt__forma="aport_jst")
-        assert "ZALOZENIE_GRUNT_JST" in kody(w)
+    def test_nieznane_pochodzenie_to_wyjatek(self):
+        with pytest.raises(BladWalidacji, match="nieznana wartosc"):
+            wspolne.wejscie(grunt__pochodzenie="skarb_panstwa")
+
+    def test_dzierzawa_bez_oplaty_rocznej_to_brak_danych(self):
+        with pytest.raises(BladWalidacji, match="oplata_roczna"):
+            wspolne.wejscie(grunt__pochodzenie="gmina", grunt__forma="dzierzawa")
+
+    def test_uzytkowanie_wieczyste_bez_oplaty_rocznej_to_brak_danych(self):
+        with pytest.raises(BladWalidacji, match="oplata_roczna"):
+            wspolne.wejscie(
+                grunt__pochodzenie="gmina", grunt__forma="uzytkowanie_wieczyste"
+            )
+
+    def test_dzierzawa_z_oplata_przechodzi(self):
+        w = wspolne.wejscie(
+            grunt__pochodzenie="gmina",
+            grunt__forma="dzierzawa",
+            grunt__oplata_roczna=120000.0,
+        )
+        assert w.grunt.oplata_roczna == Decimal("120000.00")
+        assert w.grunt.forma.wymaga_oplaty_rocznej is True
+
+    def test_lokal_za_grunt_bez_liczby_lokali_to_brak_danych(self):
+        with pytest.raises(BladWalidacji, match="liczba_lokali_dla_gminy"):
+            wspolne.wejscie(grunt__pochodzenie="gmina", grunt__forma="lokal_za_grunt")
+
+    def test_lokal_za_grunt_bez_pum_to_brak_danych(self):
+        with pytest.raises(BladWalidacji, match="pum_lokali_dla_gminy"):
+            wspolne.wejscie(
+                grunt__pochodzenie="gmina",
+                grunt__forma="lokal_za_grunt",
+                grunt__liczba_lokali_dla_gminy=6,
+            )
+
+    def test_lokal_za_grunt_nie_moze_zjesc_calego_pum(self):
+        with pytest.raises(BladWalidacji, match="calej powierzchni"):
+            wspolne.wejscie(
+                grunt__pochodzenie="gmina",
+                grunt__forma="lokal_za_grunt",
+                grunt__liczba_lokali_dla_gminy=60,
+                grunt__pum_lokali_dla_gminy=3000.0,
+            )
+
+    def test_lokale_dla_gminy_poza_trybem_lokalowym_to_blad(self):
+        with pytest.raises(BladWalidacji, match="Rozliczenie ceny lokalami"):
+            wspolne.wejscie(grunt__liczba_lokali_dla_gminy=4)
+
+    def test_odczyt_alternatywny_93_bez_ceny_to_brak_danych(self):
+        with pytest.raises(BladWalidacji, match="cena_nabycia"):
+            wspolne.wejscie(
+                grunt__pochodzenie="gmina",
+                grunt__forma="nabycie_od_gminy",
+                przelaczniki__pasmo_liczone_od_wartosci_z_operatu=False,
+            )
+
+    def test_cena_wyzsza_niz_operat_to_blad(self):
+        with pytest.raises(BladWalidacji, match="Bonifikata obniza cene"):
+            wspolne.wejscie(
+                grunt__pochodzenie="gmina",
+                grunt__forma="nabycie_od_gminy",
+                grunt__cena_nabycia=9000000.0,
+                przelaczniki__pasmo_liczone_od_wartosci_z_operatu=False,
+            )
+
+    def test_oplata_roczna_bez_zastosowania_daje_ostrzezenie(self):
+        w = wspolne.wejscie(grunt__oplata_roczna=50000.0)
+        assert "OPLATA_ROCZNA_BEZ_ZASTOSOWANIA" in kody(w)
+
+
+class TestMatrycaGruntu:
+    """Kazda forma musi miec komplet skutkow i nalezec do swojego pochodzenia."""
+
+    @pytest.mark.parametrize("forma", list(FormaGruntu))
+    def test_kazda_forma_ma_wiersz_matrycy(self, forma):
+        skutki = forma.skutki
+        assert skutki.forma == forma.value
+        assert skutki.etykieta and skutki.podpis and skutki.podstawa
+
+    @pytest.mark.parametrize("forma", list(FormaGruntu))
+    def test_forma_nalezy_do_swojego_pochodzenia(self, forma):
+        assert forma.value in forma.pochodzenie.formy_wartosci()
+
+    def test_tylko_dzierzawa_nie_daje_pasma(self):
+        bez_pasma = {f.value for f in FormaGruntu if not f.daje_pasmo_45}
+        assert bez_pasma == {"dzierzawa"}
+
+    def test_aportowe_to_dwie_formy(self):
+        aportowe = {f.value for f in FormaGruntu if f.wniesiony_aportem}
+        assert aportowe == {"aport_inwestora", "aport_gminy"}
 
 
 class TestPrzelaczniki:
