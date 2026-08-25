@@ -37,11 +37,14 @@ grunt:
   #                     | uzytkowanie_wieczyste | dzierzawa
   forma: nabycie_od_gminy
   obciazony_hipoteka: false
-  # Wymagane przy dzierzawie i uzytkowaniu wieczystym:
-  # oplata_roczna: 0.0
-  # Wymagane przy formie lokal_za_grunt:
-  # liczba_lokali_dla_gminy: 0
-  # pum_lokali_dla_gminy: 0.0
+  # Wielkosci negocjowane z gmina. Uzywane tylko przez forme, ktora ich dotyczy;
+  # przy pozostalych formach czekaja i sluza widokowi porownawczemu.
+  # Dzierzawa i uzytkowanie wieczyste — koszt biezacy przez caly okres:
+  oplata_roczna: 140000.0
+  # Lokal za grunt — liczbe i powierzchnie okresla uchwala rady gminy
+  # (ustawa z 16.12.2020, Dz.U. 2021 poz. 223), wiec sa przedmiotem negocjacji:
+  liczba_lokali_dla_gminy: 6
+  pum_lokali_dla_gminy: 300.0
   # Cena po bonifikacie — potrzebna tylko przy odczycie alternatywnym kwestii 9.3:
   # cena_nabycia: 0.0
 

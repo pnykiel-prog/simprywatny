@@ -331,8 +331,11 @@ def rozstrzygnij(w: Wejscie) -> UjecieGruntu:
         wklad_rzeczowy_gminy=wklad_gminy,
         oplata_roczna=oplata_roczna,
         gmina_wspolnikiem=skutki.gmina_wspolnikiem,
-        pum_dla_gminy=g.pum_lokali_dla_gminy,
-        liczba_lokali_dla_gminy=g.liczba_lokali_dla_gminy,
+        # Lokale dla gminy licza sie wylacznie w trybie lokalowym. Poza nim moga
+        # siedziec w wejsciu jako wielkosc odlozona do negocjacji — widok
+        # porownawczy ich potrzebuje — ale nie moga pomniejszac powierzchni.
+        pum_dla_gminy=g.pum_lokali_dla_gminy if g.rozliczany_lokalami else ZERO,
+        liczba_lokali_dla_gminy=g.liczba_lokali_dla_gminy if g.rozliczany_lokalami else 0,
         ostrzezenia=tuple(ostrzezenia),
     )
 
@@ -340,7 +343,7 @@ def rozstrzygnij(w: Wejscie) -> UjecieGruntu:
 def _ostrzezenia_lokalowe(w: Wejscie) -> List[Ostrzezenie]:
     """Ostrzezenia wlasciwe wariantowi 'lokal za grunt' — rozdz. 6."""
     g = w.grunt
-    if not g.rozliczany_lokalami:
+    if not g.rozliczany_lokalami or g.pum_lokali_dla_gminy <= ZERO:
         return []
 
     udzial = bezpieczny_iloraz(g.pum_lokali_dla_gminy, w.powierzchnie.pum_laczne)

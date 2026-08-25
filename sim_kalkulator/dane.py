@@ -432,6 +432,22 @@ class Wejscie:
         )
         return replace(kopia, ostrzezenia=tuple(waliduj(kopia, na_dzien=na_dzien)))
 
+    def z_forma_gruntu(self, forma: "FormaGruntu", na_dzien=None) -> "Wejscie":
+        """Kopia wejscia z inna forma wniesienia gruntu — do widoku porownawczego.
+
+        Pochodzenie idzie za forma, bo kazda forma nalezy do dokladnie jednego
+        pochodzenia. Walidacja od nowa: czesc form wymaga danych, ktorych wejscie
+        moze nie miec (oplata roczna, lokale dla gminy), a czesc odpada wprost
+        (aport nieruchomosci obciazonej hipoteka). Wariant niepoliczalny ma wrocic
+        z powodem, nie z liczba.
+        """
+        kopia = replace(
+            self,
+            grunt=replace(self.grunt, forma=forma, pochodzenie=forma.pochodzenie),
+            ostrzezenia=(),
+        )
+        return replace(kopia, ostrzezenia=tuple(waliduj(kopia, na_dzien=na_dzien)))
+
 
 # ---------------------------------------------------------------------------
 # Parser YAML
@@ -986,10 +1002,32 @@ def _waliduj_grunt(w: Wejscie, ostrzezenia: List[Ostrzezenie]) -> None:
                 "Po przekazaniu lokali gminie musi zostac powierzchnia na wynajem."
             )
     elif g.liczba_lokali_dla_gminy or g.pum_lokali_dla_gminy > ZERO:
-        raise BladWalidacji(
-            "Lokale dla gminy podano przy formie innej niz 'lokal_za_grunt'. "
-            "Rozliczenie ceny lokalami wystepuje tylko w tym trybie."
+        # Nie blad: liczba i powierzchnia lokali sa przedmiotem negocjacji z gmina,
+        # wiec moga byc podane zawczasu i czekac na przelaczenie formy. Widok
+        # porownawczy form gruntu bez nich nie policzy wariantu lokalowego.
+        ostrzezenia.append(
+            Ostrzezenie(
+                kod="LOKALE_DLA_GMINY_BEZ_ZASTOSOWANIA",
+                tresc=(
+                    f"Podano lokale dla gminy ({g.liczba_lokali_dla_gminy} szt., "
+                    f"{g.pum_lokali_dla_gminy} m2) przy formie '{g.forma.value}'. "
+                    "Rozliczenie ceny lokalami wystepuje tylko w trybie 'lokal_za_grunt', "
+                    "wiec te wielkosci sa pomijane w obliczeniu."
+                ),
+                podstawa="ustawa z 16.12.2020, Dz.U. 2021 poz. 223",
+                tresc_potoczna=(
+                    "Lokale dla gminy nie są tu uwzględniane — wybrana forma gruntu nie "
+                    "rozlicza ceny lokalami. Posłużą do porównania form."
+                ),
+                waga=Waga.POZOSTALE,
+            )
         )
+        if g.pum_lokali_dla_gminy >= w.powierzchnie.pum_laczne:
+            raise BladWalidacji(
+                f"'grunt.pum_lokali_dla_gminy' ({g.pum_lokali_dla_gminy}) siega calej "
+                f"powierzchni przedsiewziecia ({w.powierzchnie.pum_laczne}). Po przekazaniu "
+                "lokali gminie musi zostac powierzchnia na wynajem."
+            )
 
     # 5. Odczyt alternatywny kwestii 9.3 wymaga ceny po bonifikacie.
     if not w.przelaczniki.pasmo_liczone_od_wartosci_z_operatu:

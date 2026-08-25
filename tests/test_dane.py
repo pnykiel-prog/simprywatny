@@ -252,12 +252,18 @@ class TestGrunt:
 
     def test_dzierzawa_bez_oplaty_rocznej_to_brak_danych(self):
         with pytest.raises(BladWalidacji, match="oplata_roczna"):
-            wspolne.wejscie(grunt__pochodzenie="gmina", grunt__forma="dzierzawa")
+            wspolne.wejscie(
+                grunt__pochodzenie="gmina",
+                grunt__forma="dzierzawa",
+                grunt__oplata_roczna=wspolne.USUN,
+            )
 
     def test_uzytkowanie_wieczyste_bez_oplaty_rocznej_to_brak_danych(self):
         with pytest.raises(BladWalidacji, match="oplata_roczna"):
             wspolne.wejscie(
-                grunt__pochodzenie="gmina", grunt__forma="uzytkowanie_wieczyste"
+                grunt__pochodzenie="gmina",
+                grunt__forma="uzytkowanie_wieczyste",
+                grunt__oplata_roczna=wspolne.USUN,
             )
 
     def test_dzierzawa_z_oplata_przechodzi(self):
@@ -271,7 +277,11 @@ class TestGrunt:
 
     def test_lokal_za_grunt_bez_liczby_lokali_to_brak_danych(self):
         with pytest.raises(BladWalidacji, match="liczba_lokali_dla_gminy"):
-            wspolne.wejscie(grunt__pochodzenie="gmina", grunt__forma="lokal_za_grunt")
+            wspolne.wejscie(
+                grunt__pochodzenie="gmina",
+                grunt__forma="lokal_za_grunt",
+                grunt__liczba_lokali_dla_gminy=wspolne.USUN,
+            )
 
     def test_lokal_za_grunt_bez_pum_to_brak_danych(self):
         with pytest.raises(BladWalidacji, match="pum_lokali_dla_gminy"):
@@ -279,6 +289,7 @@ class TestGrunt:
                 grunt__pochodzenie="gmina",
                 grunt__forma="lokal_za_grunt",
                 grunt__liczba_lokali_dla_gminy=6,
+                grunt__pum_lokali_dla_gminy=wspolne.USUN,
             )
 
     def test_lokal_za_grunt_nie_moze_zjesc_calego_pum(self):
@@ -290,9 +301,22 @@ class TestGrunt:
                 grunt__pum_lokali_dla_gminy=3000.0,
             )
 
-    def test_lokale_dla_gminy_poza_trybem_lokalowym_to_blad(self):
-        with pytest.raises(BladWalidacji, match="Rozliczenie ceny lokalami"):
-            wspolne.wejscie(grunt__liczba_lokali_dla_gminy=4)
+    def test_lokale_dla_gminy_poza_trybem_lokalowym_sa_odlozone(self):
+        # Liczba i metraz sa przedmiotem uchwaly rady gminy, wiec moga czekac
+        # w wejsciu na przelaczenie formy — widok porownawczy ich potrzebuje.
+        w = wspolne.wejscie(
+            grunt__liczba_lokali_dla_gminy=4, grunt__pum_lokali_dla_gminy=200.0
+        )
+        assert "LOKALE_DLA_GMINY_BEZ_ZASTOSOWANIA" in kody(w)
+
+    def test_odlozone_lokale_nie_pomniejszaja_powierzchni_przychodowej(self):
+        from sim_kalkulator import alokacja
+
+        w = wspolne.wejscie(
+            grunt__liczba_lokali_dla_gminy=4, grunt__pum_lokali_dla_gminy=200.0
+        )
+        a = alokacja.build(w)
+        assert a.pum_przychodowe_laczne == w.powierzchnie.pum_laczne
 
     def test_odczyt_alternatywny_93_bez_ceny_to_brak_danych(self):
         with pytest.raises(BladWalidacji, match="cena_nabycia"):
