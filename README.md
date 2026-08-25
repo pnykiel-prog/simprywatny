@@ -221,6 +221,10 @@ warstwa łączna        →  wkład własny, płynność, test rekompensaty
 Wartość gruntu limituje grant w obu pulach i dzieli się kluczem PUM, zamiast być
 liczona dwa razy.
 
+**Grunt to nie jedno pole.** Pochodzenie działki i forma, w jakiej trafia do
+projektu, działają czterema niezależnymi kanałami, które nie sumują się w jeden
+parametr — patrz niżej.
+
 **Jeden silnik.** Logika obliczeniowa wyłącznie w Pythonie. UI wywołuje API, API
 woła silnik. Przeglądarka nie liczy niczego poza formatowaniem wyświetlania —
 pilnuje tego test `test_ui_nie_liczy_niczego_poza_formatowaniem`.
@@ -233,6 +237,7 @@ pilnuje tego test `test_ui_nie_liczy_niczego_poza_formatowaniem`.
 | `sim_kalkulator/waluta.py` | arytmetyka pieniądza (`Decimal`), bez żadnej stałej prawnej |
 | `sim_kalkulator/dane.py` | dataclasses wejścia, parser YAML, komplet walidacji |
 | `sim_kalkulator/alokacja.py` | podział kosztów wspólnych kluczem PUM + wysokość wsparcia |
+| `sim_kalkulator/grunt.py` | rozstrzyganie czterech kanałów gruntu, wariant lokalowy |
 | `sim_kalkulator/grant.py` | limity grantu, reguła gruntowa, bonus |
 | `sim_kalkulator/kredyt.py` | harmonogram równej raty z karencją, EDB |
 | `sim_kalkulator/czynsz.py` | dwa limity czynszu, wybór wiążącego, opłaty poza czynszem |
@@ -240,6 +245,7 @@ pilnuje tego test `test_ui_nie_liczy_niczego_poza_formatowaniem`.
 | `sim_kalkulator/rekompensata.py` | KN, RZ, EDB, test nadwyżki, asymetria gruntu |
 | `sim_kalkulator/testy_montazu.py` | trzy werdykty, wiążące ograniczenie, luki |
 | `sim_kalkulator/wrazliwosc.py` | sweep udziału pul, punkt graniczny, ranking |
+| `sim_kalkulator/porownanie.py` | przeliczenie wszystkich form gruntu, wnioski z kwotami |
 | `sim_kalkulator/arkusz.py` | eksport XLSX z formułami |
 | `sim_kalkulator/silnik.py` | orkiestrator — jedno pełne przeliczenie |
 | `sim_kalkulator/api.py` | warstwa API bez HTTP — wspólna dla obu środowisk |
@@ -259,6 +265,42 @@ pilnuje tego test `test_ui_nie_liczy_niczego_poza_formatowaniem`.
   stopy referencyjnej zatrzymuje obliczenie, nie podstawia ostatniej znanej.
 - **Pule nie są uśredniane.** Pula komunalna nie może mieć kredytu (art. 5a
   ust. 3), więc średnia ważona dałaby wynik pozornie poprawny i całkowicie fałszywy.
+
+---
+
+## Grunt — cztery kanały, jedna decyzja
+
+Pochodzenie działki (inwestor / rynek prywatny / gmina) i forma wniesienia
+zmieniają wynik w czterech miejscach naraz:
+
+| Kanał | Na co działa | Podstawa |
+|---|---|---|
+| **A — pasmo dotacji** | czy wsparcie może przekroczyć próg gruntowy | art. 13 ust. 1 pkt 1 ustawy z 8.12.2006 |
+| **B — koszt przedsięwzięcia** | czy i ile wartości gruntu wchodzi do podstawy | art. 5 ust. 7 pkt 7 i ust. 8; § 12 ust. 7 rozp. 766 |
+| **C — przychód usługi publicznej** | czy grunt obniża koszty netto, a przez to dopuszczalną pomoc | art. 5 ust. 9 pkt 4 |
+| **D — zapotrzebowanie na gotówkę** | czy wkład jest pieniężny, czy rzeczowy | klasyfikacja modelu |
+
+Kanał piąty, poza obliczeniami: aport gminy czyni ją wspólnikiem spółki.
+
+**Kanał A działa skokowo.** Dzierżawa nie daje ani własności, ani użytkowania
+wieczystego, więc ścina dotację z 45% do 35% kosztów — niezależnie od wartości
+działki. Na przykładzie z repozytorium to 3,3 mln zł; mimo braku wydatku na grunt
+dzierżawa wymaga o 2,6 mln zł **większego** wkładu własnego niż nabycie.
+
+**Kanały B i C wykluczają się.** Grunt, za który inwestor nie zapłacił, nie jest
+kosztem świadczenia usługi; grunt, który kupił, nie jest jego przychodem. Ta sama
+wartość nigdy nie wchodzi po obu stronach rachunku kosztów netto.
+
+Matryca skutków — po jednym wierszu na każdą z ośmiu form, z oznaczeniem, który
+skutek jest odczytany w przepisie (**Z**), który jest wnioskiem (**W**), a który
+wymaga potwierdzenia w BGK (**?**) — siedzi w `prawo.MATRYCA_GRUNTU` i trafia do
+zakładki `Podstawy_prawne` arkusza. Trzy pozycje **[?]** obsługiwane są jako
+przełączniki z jawnym oznaczeniem założenia; patrz `LUKI.md`, rozdz. 11.
+
+Przycisk **„Porównaj formy gruntu"** przelicza cały model dla każdej dopuszczalnej
+formy przy niezmienionych pozostałych parametrach. Wariant, którego nie da się
+policzyć — bo brakuje danych albo odpada z mocy przepisu — wraca z powodem, nigdy
+z podstawioną liczbą.
 
 ---
 

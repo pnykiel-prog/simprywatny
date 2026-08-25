@@ -25,9 +25,10 @@ import yaml
 from . import arkusz as _arkusz
 from . import prawo
 from . import wrazliwosc as _wrazliwosc
-from .dane import BladObliczenia, BladWalidacji, TrybKredytu, zbuduj
+from .dane import BladObliczenia, BladWalidacji, FormaGruntu, TrybKredytu, zbuduj
 from .silnik import Wynik, przelicz
-from .waluta import bezpieczny_iloraz, zl
+from . import porownanie as _porownanie
+from .waluta import ZERO, bezpieczny_iloraz, zl
 
 SCIEZKA_PARAMETRU = re.compile(r"[a-z_]+(\.[a-z_0-9]+)*")
 
@@ -175,7 +176,9 @@ def wynik_json(r: Wynik) -> Dict[str, Any]:
             "wklad_wlasny": _liczba(r.wklad_wlasny_na_m2),
             "luka_kapitalowa": _liczba(r.luka_kapitalowa_na_m2),
         },
-        "wklad_wymagany": _liczba(r.finansowanie.wklad_wlasny_wymagany),
+        "wklad_wymagany": _liczba(max(ZERO, r.finansowanie.wklad_gotowkowy_wymagany)),
+        "wklad_rzeczowy": _liczba(r.finansowanie.wklad_rzeczowy_laczny),
+        "nadwyzka_rzeczowa": _liczba(r.finansowanie.nadwyzka_wkladu_rzeczowego),
         "wklad_dostepny": _liczba(r.wejscie.inwestor.dostepny_wklad_wlasny),
         "edb_kredytu": _liczba(r.edb_kredytu),
         "pule": pule,
@@ -242,30 +245,75 @@ def _kaskada(r: Wynik) -> Dict[str, Any]:
     """Kaskada montazu — skad biora sie pieniadze (rozdz. 4.1).
 
     Od calkowitego kosztu odejmowane sa kolejno zrodla obce; to, co zostaje,
-    jest odpowiedzia narzedzia: wymaganym wkladem inwestora.
+    jest odpowiedzia narzedzia: wymagana gotowka inwestora. Grunt wniesiony
+    rzeczowo jest osobnym slupkiem, bo domyka koszty, nie wymagajac zlotowki.
+
+    Przy formach nieodblokowujacych pasma dotacji slupek dotacji niesie szara
+    czesc "utracone" — rozdz. 7.3 uzupelnienia nr 2.
     """
     f = r.finansowanie
-    wymagany = f.wklad_wlasny_wymagany
+    g = r.granty.spoleczna
+    wymagany = max(ZERO, f.wklad_gotowkowy_wymagany)
+    nadwyzka = f.nadwyzka_wkladu_rzeczowego
     dostepny = r.wejscie.inwestor.dostepny_wklad_wlasny
     udzial = _liczba(bezpieczny_iloraz(wymagany, f.koszty_laczne))
+
+    dotacja = {
+        "etykieta": "Dotacja",
+        "kwota": _liczba(-f.grant_laczny),
+        "rodzaj": "odjecie",
+    }
+    if g.utracony_przez_forme_gruntu:
+        dotacja["utracone"] = _liczba(g.grant_utracony)
+        dotacja["utracone_powod"] = (
+            f"Przy tej formie gruntu dotacja zatrzymuje się na "
+            f"{prawo.GRANT_SPOLECZNY_PROG_GRUNTOWY:.0%} kosztów zamiast "
+            f"{g.stawka_nominalna:.0%}. Na tej podstawie kosztowej to "
+            f"{_kwota_slownie(g.grant_utracony)}."
+        )
+
+    kroki = [
+        {"etykieta": "Koszt inwestycji", "kwota": _liczba(f.koszty_laczne), "rodzaj": "suma"},
+        dotacja,
+        {"etykieta": "Kredyt", "kwota": _liczba(-f.kredyt_laczny), "rodzaj": "odjecie"},
+        {"etykieta": "Partycypacja", "kwota": _liczba(-f.partycypacja_laczna),
+         "rodzaj": "odjecie"},
+    ]
+    if f.wklad_rzeczowy_inwestora_laczny > ZERO:
+        kroki.append({
+            "etykieta": "Grunt, który wnosisz",
+            "kwota": _liczba(-f.wklad_rzeczowy_inwestora_laczny),
+            "rodzaj": "odjecie",
+            "podpis": "Wartość działki w kosztach — nie wykładasz na nią gotówki.",
+        })
+    if f.wklad_rzeczowy_gminy_laczny > ZERO:
+        kroki.append({
+            "etykieta": "Grunt wniesiony przez gminę",
+            "kwota": _liczba(-f.wklad_rzeczowy_gminy_laczny),
+            "rodzaj": "odjecie",
+            "podpis": "Gmina obejmuje za to udziały w spółce.",
+        })
+    kroki.append({"etykieta": "Twój wkład", "kwota": _liczba(wymagany), "rodzaj": "wynik"})
+
+    if nadwyzka > ZERO:
+        zdanie = (
+            f"Nie musisz dokładać gotówki. Dotacja i wniesiony grunt domykają montaż "
+            f"z zapasem {_kwota_slownie(nadwyzka)}."
+        )
+    else:
+        zdanie = (
+            f"Żeby zrealizować tę inwestycję, musisz wyłożyć własnych "
+            f"{_kwota_slownie(wymagany)}, czyli {udzial:.0%} kosztów."
+        )
+
     return {
-        "kroki": [
-            {"etykieta": "Koszt inwestycji", "kwota": _liczba(f.koszty_laczne),
-             "rodzaj": "suma"},
-            {"etykieta": "Dotacja", "kwota": _liczba(-f.grant_laczny), "rodzaj": "odjecie"},
-            {"etykieta": "Kredyt", "kwota": _liczba(-f.kredyt_laczny), "rodzaj": "odjecie"},
-            {"etykieta": "Partycypacja", "kwota": _liczba(-f.partycypacja_laczna),
-             "rodzaj": "odjecie"},
-            {"etykieta": "Twój wkład", "kwota": _liczba(wymagany), "rodzaj": "wynik"},
-        ],
+        "kroki": kroki,
         "wymagany": _liczba(wymagany),
+        "nadwyzka_rzeczowa": _liczba(nadwyzka),
         "udzial_w_kosztach": udzial,
         "dostepny": _liczba(dostepny),
         "roznica": _liczba(dostepny - wymagany) if dostepny is not None else None,
-        "zdanie": (
-            f"Żeby zrealizować tę inwestycję, musisz wyłożyć własnych "
-            f"{_kwota_slownie(wymagany)}, czyli {udzial:.0%} kosztów."
-        ),
+        "zdanie": zdanie,
     }
 
 
@@ -396,6 +444,215 @@ def _suwak(
         "format": format_wartosci,
         "powod_granicy": powod_granicy,
         "rozwiniecie": rozwiniecie,
+    }
+
+
+def _grunt_json(r: Wynik) -> Dict[str, Any]:
+    """Dwupoziomowy wybor gruntu — rozdz. 7 uzupelnienia nr 2.
+
+    Poziom 1 to trzy przyciski (czyja jest dzialka), poziom 2 to lista form
+    z jednozdaniowym opisem SKUTKU przy kazdej. Opis jedzie razem z opcja, zeby
+    uzytkownik zobaczyl konsekwencje PRZED wyborem, a nie po.
+    """
+    w = r.wejscie
+    u = r.grunt
+
+    def opcja(nazwa: str) -> Dict[str, Any]:
+        skutki = prawo.skutki_gruntu(nazwa)
+        dostepna, powod = True, ""
+        if skutki.wnoszony_aportem and w.grunt.obciazony_hipoteka:
+            dostepna = False
+            powod = (
+                "Nieruchomość obciążona hipoteką nie może być wniesiona aportem — "
+                "wariant jest niedopuszczalny (§ 12 ust. 6 rozp. Dz.U. 2021 poz. 766)."
+            )
+        # Krotka etykieta skutku na przycisku. Skladana tutaj, bo niesie progi
+        # ustawowe — w JavaScripcie nie ma prawa byc zadnej stalej z ustawy.
+        if not skutki.pasmo_45:
+            skutek = (
+                f"dotacja {prawo.GRANT_SPOLECZNY_PROG_GRUNTOWY:.0%} zamiast "
+                f"{prawo.GRANT_SPOLECZNY_LIMIT_PODSTAWOWY:.0%}"
+            )
+        elif skutki.gmina_wspolnikiem:
+            skutek = "gmina wspólnikiem spółki"
+        else:
+            skutek = ""
+        return {
+            "klucz": nazwa,
+            "etykieta": skutki.etykieta,
+            "podpis": skutki.podpis,
+            "skutek_krotki": skutek,
+            "dostepna": dostepna,
+            "powod_niedostepnosci": powod,
+            "pasmo_45": skutki.pasmo_45,
+            "gmina_wspolnikiem": skutki.gmina_wspolnikiem,
+            "wymaga_oplaty_rocznej": skutki.z_oplata_roczna,
+            "rozlicza_lokalami": nazwa == FormaGruntu.LOKAL_ZA_GRUNT.value,
+            "wymaga_potwierdzenia": skutki.wymaga_potwierdzenia,
+            "podstawa": skutki.podstawa,
+        }
+
+    # Pola negocjowane z gmina. Widoczne przy formie, ktorej dotycza, ale
+    # edytowalne zawsze — bez nich widok porownawczy nie policzy tych wariantow.
+    pola = [
+        {
+            "klucz": "grunt.oplata_roczna",
+            "etykieta": "Opłata roczna za grunt",
+            "wartosc": _liczba(w.grunt.oplata_roczna),
+            "jednostka": "zl/rok",
+            "podpis": "Czynsz dzierżawny albo opłata za użytkowanie wieczyste. "
+                      "Obciąża wynik co roku, przez cały okres.",
+            "dotyczy_form": sorted(prawo.FORMY_Z_OPLATA_ROCZNA),
+        },
+        {
+            "klucz": "grunt.liczba_lokali_dla_gminy",
+            "etykieta": "Lokale dla gminy — liczba",
+            "wartosc": w.grunt.liczba_lokali_dla_gminy or None,
+            "jednostka": "szt.",
+            "podpis": "Uchwała rady gminy określa minimum i maksimum, więc to "
+                      "przedmiot negocjacji, a nie dana z góry.",
+            "dotyczy_form": [FormaGruntu.LOKAL_ZA_GRUNT.value],
+        },
+        {
+            "klucz": "grunt.pum_lokali_dla_gminy",
+            "etykieta": "Lokale dla gminy — powierzchnia",
+            "wartosc": _liczba(w.grunt.pum_lokali_dla_gminy) or None,
+            "jednostka": "m2",
+            "podpis": "Ta powierzchnia nie przyniesie czynszu, ale trzeba ją wybudować.",
+            "dotyczy_form": [FormaGruntu.LOKAL_ZA_GRUNT.value],
+        },
+    ]
+
+    # Zdania o skutkach biezacej formy — skladane po stronie silnika, bo niosa
+    # kwoty i progi ustawowe.
+    opisy = []
+    if u.wklad_rzeczowy_laczny > ZERO:
+        opisy.append("Grunt wnosisz rzeczowo — nie wykładasz na niego gotówki.")
+    if u.wydatek_gotowkowy > ZERO:
+        opisy.append(f"Za działkę płacisz {_kwota_slownie(u.wydatek_gotowkowy)} w gotówce.")
+    if r.alokacja.grunt_obciety_limitem > ZERO:
+        opisy.append(
+            f"Do kosztów weszło o {_kwota_slownie(r.alokacja.grunt_obciety_limitem)} mniej — "
+            f"grunt z aportu liczy się w ścieżce kredytowej do "
+            f"{prawo.GRUNT_APORT_LIMIT_W_KOSZTACH_KREDYT:.0%} kosztów przedsięwzięcia."
+        )
+    if u.przychod_uoig:
+        opisy.append(
+            "Wartość działki liczy się jako Twój przychód i obniża limit pomocy publicznej."
+        )
+    if u.oplata_roczna > ZERO:
+        opisy.append(
+            f"Opłata roczna {_kwota_slownie(u.oplata_roczna)} obciąża wynik co roku."
+        )
+    if u.rozliczany_lokalami:
+        opisy.append(
+            f"Gminie oddajesz {_dziesietnie(u.pum_dla_gminy, 0)} m² — to "
+            f"{_dziesietnie(w.grunt.koszt_lokali_dla_gminy_na_m2)} zł za metr wobec "
+            f"{_dziesietnie(w.koszty.koszt_budowy_na_m2)} zł kosztu budowy."
+        )
+    if r.granty.spoleczna.utracony_przez_forme_gruntu:
+        # Kwota liczona na TEJ podstawie kosztowej — to ubytek wzgledem stawki
+        # ustawowej, a nie roznica wzgledem innej formy gruntu. Porownanie miedzy
+        # formami przelicza caly model i daje inna, wlasciwa dla siebie kwote.
+        opisy.append(
+            f"Dotacja wychodzi o {_kwota_slownie(r.granty.spoleczna.grant_utracony)} niższa "
+            f"od ustawowego maksimum. Ile tracisz względem innej formy gruntu — "
+            f"pokaże porównanie form."
+        )
+
+    biezace = {
+        "opisy": opisy,
+        "pasmo_45": u.pasmo_45,
+        "wartosc_w_kosztach": _liczba(u.wartosc_w_kosztach),
+        "wartosc_do_pasma": _liczba(u.wartosc_do_pasma),
+        "obciete_limitem": _liczba(r.alokacja.grunt_obciety_limitem),
+        "przychod_uoig": u.przychod_uoig,
+        "wydatek_gotowkowy": _liczba(u.wydatek_gotowkowy),
+        "wklad_rzeczowy": _liczba(u.wklad_rzeczowy_laczny),
+        "oplata_roczna": _liczba(u.oplata_roczna),
+        "gmina_wspolnikiem": u.gmina_wspolnikiem,
+        "pum_dla_gminy": _liczba(u.pum_dla_gminy),
+        "grant_utracony": _liczba(r.granty.spoleczna.grant_utracony),
+        "utracony_przez_forme": r.granty.spoleczna.utracony_przez_forme_gruntu,
+        "opis": u.opis_kanalow,
+    }
+    if u.rozliczany_lokalami:
+        biezace["koszt_metra_oddanych_lokali"] = _liczba(
+            w.grunt.koszt_lokali_dla_gminy_na_m2
+        )
+        biezace["koszt_budowy_metra"] = _liczba(w.koszty.koszt_budowy_na_m2)
+
+    return {
+        "pochodzenie": w.grunt.pochodzenie.value,
+        "forma": w.grunt.forma.value,
+        "poziom1": [
+            {
+                "klucz": pochodzenie,
+                "etykieta": prawo.ETYKIETY_POCHODZENIA[pochodzenie],
+                "formy": list(prawo.formy_dla_pochodzenia(pochodzenie)),
+            }
+            for pochodzenie in prawo.POCHODZENIA_GRUNTU
+        ],
+        "poziom2": {
+            pochodzenie: [opcja(f) for f in prawo.formy_dla_pochodzenia(pochodzenie)]
+            for pochodzenie in prawo.POCHODZENIA_GRUNTU
+        },
+        "pola": pola,
+        "biezace": biezace,
+    }
+
+
+def _uwagi_wariantu(w) -> list:
+    """Krotkie uwagi pod slupkiem wariantu. Progi ustawowe skladane tu, nie w UI."""
+    uwagi = []
+    if not w.pasmo_45:
+        uwagi.append(
+            f"dotacja ścięta do {prawo.GRANT_SPOLECZNY_PROG_GRUNTOWY:.0%} kosztów"
+        )
+    if w.gmina_wspolnikiem:
+        uwagi.append("gmina wspólnikiem spółki")
+    if w.oplata_roczna > ZERO:
+        uwagi.append(f"opłata {_kwota_slownie(w.oplata_roczna)} rocznie")
+    if not w.domyka_sie:
+        uwagi.append("montaż się nie domyka")
+    return uwagi
+
+
+def porownanie_json(r: Wynik) -> Dict[str, Any]:
+    """Widok porownawczy form gruntu — rozdz. 4.3."""
+    p = _porownanie.buduj(r.wejscie)
+    return {
+        "ok": True,
+        "forma_wybrana": r.wejscie.grunt.forma.value,
+        "warianty": [
+            {
+                "forma": w.forma,
+                "etykieta": w.etykieta,
+                "podpis": w.podpis,
+                "wybrany": w.wybrany,
+                "policzalny": w.policzalny,
+                "powod": w.powod,
+                "wklad_gotowkowy": _liczba(w.wklad_gotowkowy),
+                "grant": _liczba(w.grant_laczny),
+                "dopuszczalna_pomoc": _liczba(w.dopuszczalna_pomoc),
+                "pum_przychodowe": _liczba(w.pum_przychodowe),
+                "oplata_roczna": _liczba(w.oplata_roczna),
+                "domyka_sie": w.domyka_sie,
+                "gmina_wspolnikiem": w.gmina_wspolnikiem,
+                "pasmo_45": w.pasmo_45,
+                "uwagi": _uwagi_wariantu(w),
+            }
+            for w in p.wedlug_wkladu() + tuple(x for x in p.warianty if not x.policzalny)
+        ],
+        "wnioski": [
+            {
+                "kod": wn.kod,
+                "tresc": wn.tresc,
+                "forma_polecana": wn.forma_polecana,
+                "kwota": _liczba(wn.kwota),
+            }
+            for wn in p.wnioski
+        ],
     }
 
 
@@ -530,6 +787,9 @@ def zakresy_json(r: Wynik) -> Dict[str, Any]:
 
     return {
         "suwaki": suwaki,
+        # Wybor formy gruntu nalezy do skali projektu, nie do dzwigni — jest
+        # decyzja strukturalna, nie parametrem do przesuwania (rozdz. 7.1).
+        "grunt": _grunt_json(r),
         # Kredyt znika ze sterowania przy 100% puli komunalnej — przepisy go tam
         # wykluczaja, wiec nie ma czym sterowac (rozdz. 5.1).
         "kredyt_dostepny": spoleczna_aktywna,
@@ -678,6 +938,9 @@ def obsluz(
             odpowiedz["zakresy"] = zakresy_json(wynik)
             odpowiedz["sciagniete"] = sciagniete
             return 200, odpowiedz
+        if akcja == "porownanie":
+            dane, _ = dociagnij_czynsze(dane)
+            return 200, porownanie_json(przelicz(zbuduj(dane)))
         if akcja == "sweep":
             dane, _ = dociagnij_czynsze(dane)
             return 200, sweep_json(zbuduj(dane))

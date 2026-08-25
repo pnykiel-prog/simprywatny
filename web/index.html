@@ -88,6 +88,52 @@ input[type=range]{width:100%;height:22px;accent-color:var(--akcent);margin:0}
 details summary{cursor:pointer;font-size:12px;font-weight:600;color:var(--akcent);padding:3px 0}
 .przelacznik{display:flex;align-items:center;gap:7px;font-size:12.5px;margin-top:8px}
 
+/* ---------- wybor gruntu ---------- */
+.grunt{margin-top:12px;border-top:1px solid var(--linia);padding-top:11px}
+.grunt h3{margin:0 0 3px;font-size:12.5px;font-weight:600}
+.grunt .pod{font-size:11px;color:var(--tekst-2);margin:0 0 8px}
+.pochodzenia{display:grid;gap:7px;grid-template-columns:repeat(3,1fr)}
+.pochodzenie{display:flex;flex-direction:column;align-items:center;gap:4px;
+  background:var(--karta);border:1px solid var(--linia-mocna);border-radius:6px;
+  padding:9px 5px;font:inherit;font-size:11px;line-height:1.25;text-align:center;
+  color:var(--tekst);cursor:pointer}
+.pochodzenie .znak{font-size:19px;line-height:1}
+.pochodzenie[aria-pressed="true"]{border-color:var(--akcent);border-width:2px;
+  padding:8px 4px;background:var(--pasmo-ok);font-weight:600}
+.formy{display:grid;gap:6px;margin-top:9px}
+.forma{display:block;width:100%;text-align:left;background:var(--karta);
+  border:1px solid var(--linia);border-left:4px solid var(--linia-mocna);
+  border-radius:0 5px 5px 0;padding:7px 10px;font:inherit;color:var(--tekst);cursor:pointer}
+.forma b{display:block;font-size:12.5px;font-weight:600}
+.forma i{display:block;font-style:normal;font-size:11px;color:var(--tekst-2);
+  line-height:1.35;margin-top:2px}
+.forma .skutek{display:inline-block;font-size:10px;font-weight:600;letter-spacing:.03em;
+  text-transform:uppercase;margin-top:4px;padding:1px 5px;border-radius:3px;
+  background:var(--pasmo-zle);color:var(--zle)}
+.forma[aria-pressed="true"]{border-color:var(--akcent);border-left-color:var(--akcent);
+  background:var(--pasmo-ok)}
+.forma[disabled]{opacity:.5;cursor:not-allowed}
+.forma[disabled] i{color:var(--zle)}
+.grunt-pola{display:grid;gap:9px;margin-top:10px}
+.grunt-skutki{font-size:11px;color:var(--tekst-3);margin-top:8px;line-height:1.4}
+
+/* ---------- porownanie form gruntu ---------- */
+.porownanie{display:grid;gap:5px;margin-top:4px}
+.wariant{display:grid;grid-template-columns:150px 1fr 96px;gap:8px;align-items:center;
+  font-size:12px}
+.wariant .nazwa{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wariant .pasek{background:var(--tlo);border-radius:3px;height:19px;position:relative}
+.wariant .pasek em{position:absolute;left:0;top:0;bottom:0;border-radius:3px;
+  background:var(--s1);display:block}
+.wariant.wybrany .pasek em{background:var(--akcent)}
+.wariant.wybrany .nazwa{font-weight:700}
+.wariant .kwota{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
+.wariant.brak .pasek{background:none}
+.wariant.brak .kwota{font-weight:400;color:var(--tekst-3);font-size:11px}
+.wariant small{display:block;color:var(--tekst-3);font-size:10.5px;line-height:1.3}
+.wniosek{background:var(--karta);border:1px solid var(--linia);border-left:4px solid var(--akcent);
+  border-radius:0 5px 5px 0;padding:9px 12px;margin-bottom:8px;font-size:12.5px;line-height:1.45}
+
 /* ---------- wykresy ---------- */
 .wykres{width:100%;height:auto;display:block;overflow:visible}
 .podpis-wykresu{font-size:13px;color:var(--tekst);margin-top:8px;line-height:1.45}
@@ -136,17 +182,35 @@ button.akcja:disabled{opacity:.55;cursor:progress}
   <div class="strefy">
     <!-- ============ STEROWANIE ============ -->
     <div>
+      <div class="karta">
+        <h2>Skala projektu</h2>
+        <div class="pola" id="pola-liczbowe"></div>
+
+        <!-- Wybór formy gruntu jest decyzją strukturalną, nie parametrem do
+             przesuwania, więc siedzi przy skali projektu, a nie wśród dźwigni.
+             Stoi przed suwakiem udziału pul, bo rozstrzyga się wcześniej. -->
+        <div class="grunt">
+          <h3>Działka</h3>
+          <div class="pod">Czyja jest i w jakiej formie trafia do projektu. Ta decyzja
+            zmienia wynik w czterech miejscach naraz.</div>
+          <div class="pochodzenia" id="grunt-pochodzenia" role="group"
+               aria-label="Czyja jest działka"></div>
+          <div class="formy" id="grunt-formy" role="group"
+               aria-label="W jakiej formie działka trafia do projektu"></div>
+          <div class="grunt-pola" id="grunt-pola"></div>
+          <div class="grunt-skutki" id="grunt-skutki"></div>
+          <div class="przyciski">
+            <button class="akcja wtorny" id="btn-porownanie" type="button">Porównaj formy gruntu</button>
+          </div>
+        </div>
+      </div>
+
       <div class="karta pokretlo">
         <h2>Udział mieszkań komunalnych</h2>
         <div class="wart" id="pokretlo-wart">—</div>
         <div class="pod" id="pokretlo-podpis"></div>
         <input type="range" id="pokretlo" min="0" max="100" step="5" value="30">
         <div class="znaczniki" id="pokretlo-znaczniki"></div>
-      </div>
-
-      <div class="karta">
-        <h2>Skala projektu</h2>
-        <div class="pola" id="pola-liczbowe"></div>
       </div>
 
       <div class="karta">
@@ -174,6 +238,15 @@ button.akcja:disabled{opacity:.55;cursor:progress}
         <svg id="w-kaskada" class="wykres" viewBox="0 0 620 250" role="img"
              aria-label="Kaskada: od kosztu inwestycji przez dotację, kredyt i partycypację do wymaganego wkładu"></svg>
         <div class="podpis-wykresu" id="p-kaskada"></div>
+      </div>
+
+      <!-- Widok porównawczy: różnice między formami gruntu są duże i nieoczywiste,
+           więc pokazujemy je słupkowo przy niezmienionych pozostałych parametrach. -->
+      <div class="karta" id="karta-porownania" hidden>
+        <h2>Co dałaby inna forma gruntu</h2>
+        <div id="porownanie-wnioski"></div>
+        <div class="porownanie" id="porownanie-warianty"></div>
+        <div class="podpis-wykresu" id="p-porownanie"></div>
       </div>
 
       <div class="karta">
@@ -313,7 +386,9 @@ function rysujKaskade(k){
     const y = BAZA - skala(k.dostepny);
     svg.appendChild(el("line", {x1:L, y1:y, x2:W-R, y2:y, stroke:"var(--tekst-3)",
       "stroke-width":1.5, "stroke-dasharray":"5 4"}));
-    svg.appendChild(el("text", {x:W-R, y:y-5, "text-anchor":"end", class:"os",
+    // Etykieta po lewej: po prawej stoi slupek wyniku i jego wartosc, a linia
+    // kapitalu przecina go dokladnie tam, gdzie ta wartosc jest wypisana.
+    svg.appendChild(el("text", {x:L+3, y:y-5, "text-anchor":"start", class:"os",
       fill:"var(--tekst-2)"}, "Twój kapitał: " + mln(k.dostepny)));
   }
 
@@ -338,6 +413,24 @@ function rysujKaskade(k){
       g.appendChild(el("text", {x:x+slupek/2, y:BAZA+30, "text-anchor":"middle",
         class:"os", fill:"var(--s7)"}, "= odpowiedź"));
     svg.appendChild(g);
+
+    // Szary słupek "utracone" tuż obok dotacji — ile dotacji przepada przez
+    // wybraną formę gruntu (rozdz. 7.3 uzupełnienia nr 2). Stoi PRZY słupku,
+    // nie na nim, żeby nie zasłaniał ani go, ani jego etykiety.
+    if (krok.utracone){
+      const hu = Math.max(3, skala(krok.utracone));
+      const xu = x + slupek + 3, szeru = Math.max(6, slupek * 0.26);
+      const gu = el("g", {});
+      gu.appendChild(el("rect", {x: xu.toFixed(1), y: (y - hu).toFixed(1),
+        width: szeru.toFixed(1), height: hu.toFixed(1),
+        fill: "var(--neutral)", opacity: ".45", rx: 2}));
+      gu.appendChild(el("text", {x: xu.toFixed(1), y: (y - hu - 5).toFixed(1),
+        "text-anchor": "start", class: "os"}, "utracone " + mln(krok.utracone)));
+      tytulHover(gu, "Utracone przez formę gruntu: " + zl0(krok.utracone)
+        + ". " + (krok.utracone_powod || ""));
+      svg.appendChild(gu);
+    }
+
     // lacznik miedzy slupkami
     if (i < kroki.length-1 && krok.rodzaj !== "wynik"){
       const yl = BAZA - skala(krok.rodzaj === "suma" ? krok.kwota : biezace);
@@ -741,6 +834,103 @@ function rysujPolaLiczbowe(z){
   });
 }
 
+/* ================= wybór gruntu =================
+   Dwa poziomy. Poziom 1 to trzy przyciski — pierwsza rozwidlająca decyzja ma być
+   widoczna, nie schowana w liście rozwijanej. Poziom 2 odsłania się dopiero po
+   wyborze i przy każdej opcji niesie jedno zdanie o skutku, żeby użytkownik
+   zobaczył konsekwencję PRZED wyborem, a nie po. */
+const ZNAKI_POCHODZENIA = {inwestor: "🏢", rynek_prywatny: "🤝", gmina: "🏛"};
+
+function rysujGrunt(z){
+  const g = z.grunt;
+  $("#grunt-pochodzenia").innerHTML = g.poziom1.map(pkt => `
+    <button type="button" class="pochodzenie" data-klucz="${pkt.klucz}"
+            aria-pressed="${pkt.klucz === g.pochodzenie}">
+      <span class="znak" aria-hidden="true">${ZNAKI_POCHODZENIA[pkt.klucz] || "▪"}</span>
+      <span>${pkt.etykieta}</span>
+    </button>`).join("");
+
+  const opcje = g.poziom2[g.pochodzenie] || [];
+  $("#grunt-formy").innerHTML = opcje.map(o => `
+    <button type="button" class="forma" data-klucz="${o.klucz}"
+            aria-pressed="${o.klucz === g.forma}" ${o.dostepna ? "" : "disabled"}>
+      <b>${o.etykieta}</b>
+      <i>${o.dostepna ? o.podpis : o.powod_niedostepnosci}</i>
+      ${o.skutek_krotki && o.dostepna ? `<span class="skutek">${o.skutek_krotki}</span>` : ""}
+    </button>`).join("");
+
+  // Pola negocjowane z gminą. Widoczne przy formie, której dotyczą — poza nią
+  // czekają na przełączenie i zasilają widok porównawczy.
+  const istotne = g.pola.filter(pole => pole.dotyczy_form.includes(g.forma));
+  $("#grunt-pola").innerHTML = istotne.map(pole => `
+    <div class="polex">
+      <label for="g-${pole.klucz}">${pole.etykieta}<span class="jedn">${pole.jednostka}</span></label>
+      <div class="podpis">${pole.podpis}</div>
+      <input id="g-${pole.klucz}" type="number" step="any" value="${pole.wartosc ?? ""}">
+    </div>`).join("");
+
+  // Zdania o skutkach składa silnik — niosą progi ustawowe i kwoty.
+  $("#grunt-skutki").innerHTML = g.biezace.opisy.map(x => "• " + x).join("<br>");
+
+  $("#grunt-pochodzenia").querySelectorAll(".pochodzenie").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const pochodzenie = btn.dataset.klucz;
+      if (pochodzenie === g.pochodzenie) return;
+      // Zmiana pochodzenia zmienia zestaw form, więc forma idzie na pierwszą
+      // dopuszczalną dla nowego pochodzenia — inaczej wejście byłoby niespójne.
+      const formy = (g.poziom2[pochodzenie] || []);
+      const pierwsza = (formy.find(o => o.dostepna) || formy[0] || {}).klucz;
+      zmiany["grunt.pochodzenie"] = pochodzenie;
+      if (pierwsza) zmiany["grunt.forma"] = pierwsza;
+      ukryjPorownanie();
+      przelicz().then(odswiezSweep);
+    });
+  });
+  $("#grunt-formy").querySelectorAll(".forma").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (btn.disabled || btn.dataset.klucz === g.forma) return;
+      zmiany["grunt.forma"] = btn.dataset.klucz;
+      ukryjPorownanie();
+      przelicz().then(odswiezSweep);
+    });
+  });
+  istotne.forEach((pole) => {
+    const w = document.getElementById("g-" + pole.klucz);
+    w.addEventListener("change", () => {
+      if (w.value === "") delete zmiany[pole.klucz]; else zmiany[pole.klucz] = Number(w.value);
+      przelicz().then(odswiezSweep);
+    });
+  });
+}
+
+/* ================= porównanie form gruntu ================= */
+function ukryjPorownanie(){ $("#karta-porownania").hidden = true; }
+
+function rysujPorownanie(p){
+  const policzalne = p.warianty.filter(w => w.policzalny);
+  const maks = Math.max(...policzalne.map(w => w.wklad_gotowkowy), 1);
+  $("#porownanie-wnioski").innerHTML = p.wnioski
+    .map(w => `<div class="wniosek">${w.tresc}</div>`).join("");
+  $("#porownanie-warianty").innerHTML = p.warianty.map(w => {
+    if (!w.policzalny) return `<div class="wariant brak">
+      <div class="nazwa">${w.etykieta}</div>
+      <div class="pasek"></div>
+      <div class="kwota">brak danych</div>
+      <small style="grid-column:1/-1">${w.powod}</small></div>`;
+    const uwagi = w.uwagi || [];
+    return `<div class="wariant${w.wybrany ? " wybrany" : ""}">
+      <div class="nazwa" title="${w.etykieta}">${w.etykieta}${w.wybrany ? " ●" : ""}</div>
+      <div class="pasek"><em style="width:${(w.wklad_gotowkowy / maks * 100).toFixed(1)}%"></em></div>
+      <div class="kwota">${mln(w.wklad_gotowkowy)}</div>
+      ${uwagi.length ? `<small style="grid-column:1/-1">${uwagi.join(" · ")}</small>` : ""}
+    </div>`;
+  }).join("");
+  $("#p-porownanie").textContent =
+    "Słupek to gotówka, którą musisz wyłożyć przy danej formie gruntu. "
+    + "Pozostałe parametry bez zmian.";
+  $("#karta-porownania").hidden = false;
+}
+
 function rysujParametryRynkowe(z){
   const r = z.parametry_rynkowe;
   $("#panel-rynkowy-tytul").textContent = r.przeterminowane
@@ -809,6 +999,7 @@ async function przelicz(){
     rysujGauge(w.wykresy.rekompensata_zapas);
     rysujPrzeplywy(w.wykresy.przeplywy);
     rysujSuwaki(zakresy);
+    rysujGrunt(zakresy);
     $("#tryb-opis").textContent = zakresy.kredyt_dostepny
       ? ($("#tryb-reczny").checked
           ? "Kredyt ustawiasz sam. Wskaźnik pokrycia może wyjść poniżej jedności."
@@ -858,6 +1049,16 @@ $("#pokretlo").addEventListener("change", () => { odswiezSweep(); });
 $("#tryb-reczny").addEventListener("change", (ev) => {
   zmiany["przelaczniki.tryb_kredytu"] = ev.target.checked ? "reczny" : "automatyczny";
   przelicz().then(odswiezSweep);
+});
+$("#btn-porownanie").addEventListener("click", async (ev) => {
+  const b = ev.currentTarget, etykieta = b.textContent;
+  b.disabled = true; b.textContent = "Liczenie wariantów…";
+  try{
+    rysujPorownanie(await api("/api/porownanie", {zmiany: biezaceZmiany()}));
+    $("#karta-porownania").scrollIntoView({behavior: "smooth", block: "nearest"});
+    pokazBlad("");
+  }catch(e){ pokazBlad(e.message); }
+  finally{ b.disabled = false; b.textContent = etykieta; }
 });
 $("#btn-arkusz").addEventListener("click", async (ev) => {
   const b = ev.currentTarget, etykieta = b.textContent;

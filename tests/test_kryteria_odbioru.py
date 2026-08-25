@@ -281,3 +281,117 @@ class TestKryterium7_BezNumerowArtykulow:
         }""")
         trafienia = re.findall(r"\bart\.\s*\d[^\n]{0,40}|§\s*\d[^\n]{0,40}", widoczny)
         assert trafienia == [], trafienia
+
+
+# ---------------------------------------------------------------------------
+# 8. Warstwa interakcji dla gruntu — rozdz. 7 uzupelnienia nr 2.
+#    Dwa poziomy wyboru, skutek widoczny PRZED wyborem, szary slupek utraconej
+#    dotacji i widok porownawczy form.
+# ---------------------------------------------------------------------------
+
+class TestGrunt_WarstwaInterakcji:
+    def test_poziom_1_ma_trzy_opcje_wzajemnie_wykluczajace(self, adres):
+        w = wolaj(adres, "/api/przelicz", {"zmiany": {}})
+        g = w["zakresy"]["grunt"]
+        assert [p["klucz"] for p in g["poziom1"]] == [
+            "inwestor", "rynek_prywatny", "gmina"
+        ]
+        wszystkie = [f for p in g["poziom1"] for f in p["formy"]]
+        assert len(wszystkie) == len(set(wszystkie))
+
+    def test_kazda_opcja_poziomu_2_niesie_opis_skutku(self, adres):
+        w = wolaj(adres, "/api/przelicz", {"zmiany": {}})
+        for opcje in w["zakresy"]["grunt"]["poziom2"].values():
+            for o in opcje:
+                assert o["podpis"], o["klucz"]
+
+    def test_formy_scinajace_dotacje_i_ustrojowe_maja_znacznik(self, adres):
+        w = wolaj(adres, "/api/przelicz", {"zmiany": {}})
+        wg_klucza = {
+            o["klucz"]: o
+            for opcje in w["zakresy"]["grunt"]["poziom2"].values()
+            for o in opcje
+        }
+        assert wg_klucza["dzierzawa"]["skutek_krotki"]
+        assert wg_klucza["aport_gminy"]["skutek_krotki"]
+        assert wg_klucza["nabycie_od_gminy"]["skutek_krotki"] == ""
+
+    def test_hipoteka_wylacza_formy_aportowe_z_podaniem_powodu(self, adres):
+        w = wolaj(adres, "/api/przelicz", {"zmiany": {"grunt.obciazony_hipoteka": True}})
+        aport = next(
+            o for o in w["zakresy"]["grunt"]["poziom2"]["gmina"]
+            if o["klucz"] == "aport_gminy"
+        )
+        assert aport["dostepna"] is False
+        assert "hipotek" in aport["powod_niedostepnosci"].lower()
+
+    def test_kaskada_niesie_slupek_utraconej_dotacji(self, adres):
+        w = wolaj(adres, "/api/przelicz", {"zmiany": {"grunt.forma": "dzierzawa"}})
+        dotacja = next(
+            k for k in w["wykresy"]["kaskada"]["kroki"] if k["etykieta"] == "Dotacja"
+        )
+        assert dotacja["utracone"] > 0
+        assert dotacja["utracone_powod"]
+
+    def test_bez_sciecia_pasma_nie_ma_slupka_utraconego(self, adres):
+        w = wolaj(adres, "/api/przelicz", {"zmiany": {}})
+        dotacja = next(
+            k for k in w["wykresy"]["kaskada"]["kroki"] if k["etykieta"] == "Dotacja"
+        )
+        assert "utracone" not in dotacja
+
+    def test_grunt_wniesiony_rzeczowo_jest_osobnym_krokiem_kaskady(self, adres):
+        w = wolaj(adres, "/api/przelicz", {"zmiany": {"grunt.forma": "aport_gminy"}})
+        etykiety = [k["etykieta"] for k in w["wykresy"]["kaskada"]["kroki"]]
+        assert "Grunt wniesiony przez gminę" in etykiety
+
+    def test_porownanie_zwraca_wszystkie_formy_pochodzenia(self, adres):
+        w = wolaj(adres, "/api/porownanie", {"zmiany": {}})
+        assert {v["forma"] for v in w["warianty"]} == {
+            "nabycie_od_gminy", "lokal_za_grunt", "aport_gminy",
+            "uzytkowanie_wieczyste", "dzierzawa",
+        }
+        assert sum(1 for v in w["warianty"] if v["wybrany"]) == 1
+
+    def test_porownanie_daje_wniosek_przy_dzierzawie(self, adres):
+        w = wolaj(adres, "/api/porownanie", {"zmiany": {"grunt.forma": "dzierzawa"}})
+        kody = {wn["kod"] for wn in w["wnioski"]}
+        assert "DZIERZAWA_PULAPKA_KOSZTOWA" in kody
+
+    def test_wnioski_nie_niosa_numerow_artykulow(self, adres):
+        for forma in ("dzierzawa", "aport_gminy"):
+            w = wolaj(adres, "/api/porownanie", {"zmiany": {"grunt.forma": forma}})
+            for wn in w["wnioski"]:
+                assert not ARTYKUL.search(wn["tresc"]), wn["tresc"]
+
+    def test_opisy_skutkow_nie_niosa_numerow_artykulow(self, adres):
+        for forma in ("dzierzawa", "aport_gminy", "lokal_za_grunt"):
+            w = wolaj(adres, "/api/przelicz", {"zmiany": {"grunt.forma": forma}})
+            for opis in w["zakresy"]["grunt"]["biezace"]["opisy"]:
+                assert not ARTYKUL.search(opis), opis
+
+    @pytest.mark.wolne
+    def test_przegladarka_pokazuje_dwa_poziomy_i_przelacza_forme(self, strona):
+        p, bledy = strona
+        assert p.locator("#grunt-pochodzenia .pochodzenie").count() == 3
+        assert p.locator('.pochodzenie[aria-pressed="true"]').count() == 1
+        # Poziom 2 odslania sie po wyborze poziomu 1 i pokazuje skutek przy kazdej opcji.
+        opisy = p.locator("#grunt-formy .forma i").all_inner_texts()
+        assert len(opisy) == 5 and all(o.strip() for o in opisy)
+
+        p.locator('.forma[data-klucz="dzierzawa"]').click()
+        p.wait_for_timeout(2500)
+        assert p.locator('.forma[data-klucz="dzierzawa"][aria-pressed="true"]').count() == 1
+        # Pole opłaty rocznej odsłania się dopiero przy formie, która jej wymaga.
+        assert p.locator("#grunt-pola input").count() == 1
+        assert bledy == [], bledy[:3]
+
+    @pytest.mark.wolne
+    def test_przegladarka_rysuje_porownanie_form(self, strona):
+        p, bledy = strona
+        p.locator("#btn-porownanie").click()
+        p.wait_for_selector("#karta-porownania:not([hidden])", timeout=60000)
+        p.wait_for_timeout(1500)
+        assert p.locator("#porownanie-warianty .wariant").count() == 5
+        assert p.locator("#porownanie-wnioski .wniosek").count() >= 1
+        assert bledy == [], bledy[:3]
