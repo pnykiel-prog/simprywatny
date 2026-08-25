@@ -83,6 +83,27 @@ def _annuita(kwota: Decimal, stopa: Decimal, okresy: int) -> Decimal:
     return kwota * stopa * czynnik / (czynnik - JEDEN)
 
 
+def wartosc_biezaca_rat(
+    rata: Decimal, stopa: Decimal, okresy_splaty: int, karencja_lat: int
+) -> Decimal:
+    """Kwota kredytu, ktora przy danej stopie da dokladnie taka rate roczna.
+
+    Odwrocenie wzoru annuitetowego. W okresie karencji placone sa same odsetki,
+    wiec karencja nie zmienia zdolnosci do udzwigniecia kapitalu — wplywa na
+    harmonogram, nie na wysokosc raty po karencji.
+
+    Sluzy jako pierwsze przyblizenie przy szukaniu maksymalnego kredytu
+    obslugiwalnego; wiazacy jest rachunek na pelnej projekcji, bo ta uwzglednia
+    indeksacje kosztow i czynszu przez caly okres.
+    """
+    if rata <= ZERO or okresy_splaty <= 0:
+        return ZERO
+    if stopa == ZERO:
+        return rata * Decimal(okresy_splaty)
+    czynnik = (JEDEN + stopa) ** okresy_splaty
+    return rata * (czynnik - JEDEN) / (stopa * czynnik)
+
+
 def harmonogram(k: Kredyt, kwota: Decimal) -> Harmonogram:
     """Buduje harmonogram splat rownej raty z karencja splaty kapitalu."""
     kwota = zl(kwota)

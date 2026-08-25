@@ -108,7 +108,7 @@ class TestPrzelicz:
         _, malo = wolaj(adres, "/api/przelicz",
                         {"zmiany": {"powierzchnie.udzial_puli_komunalnej": 0.1}})
         _, duzo = wolaj(adres, "/api/przelicz",
-                        {"zmiany": {"powierzchnie.udzial_puli_komunalnej": 0.9}})
+                        {"zmiany": {"powierzchnie.udzial_puli_komunalnej": 0.95}})
         assert duzo["wklad_wymagany"] > malo["wklad_wymagany"]
         assert malo["domyka_sie"] and not duzo["domyka_sie"]
 
@@ -187,8 +187,8 @@ class TestSweep:
         kod, dane = wolaj(adres, "/api/sweep", {"zmiany": {}})
         assert kod == 200
         assert len(dane["punkty"]) == 21
-        assert dane["maksymalny_udzial"] == pytest.approx(0.55)
-        assert dane["punkt_graniczny"] == pytest.approx(0.60)
+        assert dane["maksymalny_udzial"] == pytest.approx(0.80)
+        assert dane["punkt_graniczny"] == pytest.approx(0.85)
 
     def test_punkty_niepoliczalne_niosa_powod(self, adres):
         _, dane = wolaj(adres, "/api/sweep", {"zmiany": {}})

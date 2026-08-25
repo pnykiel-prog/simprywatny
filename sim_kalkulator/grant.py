@@ -16,7 +16,7 @@ from typing import List, Optional, Tuple
 
 from . import prawo
 from .alokacja import Alokacja, PulaKosztow
-from .dane import FormaGruntu, Ostrzezenie, Wejscie
+from .dane import FormaGruntu, Ostrzezenie, Wejscie, Waga
 from .waluta import ZERO, bezpieczny_iloraz
 
 
@@ -92,6 +92,12 @@ def _grant_spoleczny(w: Wejscie, pula: PulaKosztow, ostrzezenia: List[Ostrzezeni
                     "ZALOZENIE do potwierdzenia w BGK — patrz LUKI.md."
                 ),
                 podstawa="art. 13 ust. 1 pkt 1 w zw. z art. 13 ust. 4 ustawy z 8.12.2006",
+            
+                tresc_potoczna=(
+                    "Dodatkowe 5% dotacji naliczono przy zalozeniu, ze nie podnosi ono progu "
+                    "gruntowego. Odczyt alternatywny dalby wyzsza dotacje — do potwierdzenia w Banku."
+                ),
+                waga=Waga.ZMIENIA_KWOTE,
             )
         )
 
@@ -172,7 +178,13 @@ def build(w: Wejscie, a: Alokacja) -> Granty:
                         "daje istotnie wyzszy grant. Kwestia otwarta 10.1."
                     ),
                     podstawa="art. 13 ust. 1a ustawy z 8.12.2006",
-                )
+                
+                tresc_potoczna=(
+                    "Laczna dotacja zostala sciagnieta do 45% kosztow, bo obie pule potraktowano "
+                    "jako jedna inwestycje. Przy odczycie przeciwnym dotacja bylaby istotnie wyzsza."
+                ),
+                waga=Waga.ZMIENIA_WERDYKT,
+            )
             )
 
     if a.spoleczna.aktywna and spoleczna.ograniczony_gruntem:
@@ -187,6 +199,12 @@ def build(w: Wejscie, a: Alokacja) -> Granty:
                     "do wysokosci wartosci gruntu we wladaniu inwestora."
                 ),
                 podstawa="art. 13 ust. 1 pkt 1 ustawy z 8.12.2006",
+            
+                tresc_potoczna=(
+                    "Dotacja wyszla nizsza niz 45%, bo czesc powyzej 35% jest ograniczona wartoscia "
+                    "Twojego gruntu. Drozszy grunt oznacza wyzsza dotacje."
+                ),
+                waga=Waga.ZMIENIA_KWOTE,
             )
         )
 

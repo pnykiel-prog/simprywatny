@@ -19,12 +19,78 @@ from . import rekompensata as _rekompensata
 from . import testy_montazu as _testy
 from .alokacja import Alokacja
 from .czynsz import LimityCzynszu
-from .dane import BladWalidacji, Ostrzezenie, Wejscie
+from . import prawo
+from .dane import BladWalidacji, Ostrzezenie, TrybKredytu, Wejscie
 from .grant import Granty
 from .projekcja import Finansowanie, Projekcja
 from .rekompensata import TestRekompensaty
 from .testy_montazu import Werdykty
-from .waluta import ZERO, na_m2
+from .waluta import ZERO, na_m2, pelne_zlote_w_dol
+
+JEDEN = Decimal(1)
+
+
+def kredyt_maksymalny_obslugiwalny(
+    w: Wejscie, a: Alokacja, g: Granty,
+    limity_s: LimityCzynszu, limity_k: LimityCzynszu,
+) -> Decimal:
+    """Najwiekszy kredyt, ktory uniesie zakladany czynsz przez caly okres.
+
+    Rozdz. 2.2 uzupelnienia specyfikacji: kredyt przestaje byc parametrem
+    wpisywanym z reki. Dzieki temu wskaznik pokrycia obslugi dlugu wychodzi 1,0
+    z konstrukcji, a cale napiecie montazu przenosi sie do wymaganego wkladu.
+
+    Rozwiazanie jest zamkniete, bo rata jest liniowa wzgledem kwoty kredytu:
+    w karencji wynosi S*rp, po karencji S*annuita. Warunek pokrycia w kazdym
+    roku sprowadza sie wiec do S <= (przychod_i - koszty_i) / wspolczynnik_i,
+    a wiazacy jest rok o najmniejszym ilorazie. Rata jest nominalnie stala,
+    a przychod i koszty sa indeksowane roznymi wskaznikami, wiec waskie gardlo
+    nie musi wypadac w pierwszym roku — dlatego badane sa wszystkie lata.
+
+    Podstawa raty dostepnej to pelny mianownik testu 2, z ubezpieczeniem
+    i kosztami zarzadu. Skrocony wzor ze specyfikacji pomija okolo polowy
+    kosztow biezacych i dalby pokrycie ponizej jednosci, czyli dokladnie
+    odwrotnie niz zapowiada rozdzial 2.2.
+
+    Gorne ograniczenie: art. 15b ust. 2 ustawy z 26.10.1995.
+    """
+    if not a.spoleczna.aktywna:
+        return ZERO
+    k = w.pula_spoleczna.kredyt
+    okresy_splaty = k.okres_lat - k.karencja_lat
+    if k.okres_lat <= 0 or okresy_splaty <= 0:
+        return ZERO
+
+    # Projekcja bez kredytu daje przychody i koszty biezace — obie wielkosci
+    # nie zaleza od kwoty kredytu, wiec wystarczy policzyc je raz.
+    bez_kredytu = _projekcja.zbuduj_finansowanie(w, a, g, kwota_kredytu=ZERO)
+    proj = _projekcja.build(w, a, bez_kredytu, limity_s, limity_k)
+
+    # Rata przypadajaca na zlotowke kredytu, osobno w karencji i po niej.
+    if k.oprocentowanie == ZERO:
+        annuita_jednostkowa = JEDEN / Decimal(okresy_splaty)
+    else:
+        czynnik = (JEDEN + k.oprocentowanie) ** okresy_splaty
+        annuita_jednostkowa = k.oprocentowanie * czynnik / (czynnik - JEDEN)
+
+    pulapy = []
+    for rok in proj.spoleczna.lata:
+        if rok.rok > k.okres_lat:
+            continue                       # po splacie kredyt nie obciaza juz przeplywu
+        dostepne_na_rate = rok.przychod_czynszowy_netto - rok.koszty_operacyjne
+        if dostepne_na_rate <= ZERO:
+            return ZERO                    # czynsz nie pokrywa nawet kosztow biezacych
+        wspolczynnik = (
+            k.oprocentowanie if rok.rok <= k.karencja_lat else annuita_jednostkowa
+        )
+        if wspolczynnik <= ZERO:
+            continue                       # rok bez obciazenia — nie ogranicza kwoty
+        pulapy.append(dostepne_na_rate / wspolczynnik)
+
+    if not pulapy:
+        return ZERO
+    limit_ustawowy = a.spoleczna.koszty_przedsiewziecia * prawo.KREDYT_MAKSYMALNY_UDZIAL
+    return pelne_zlote_w_dol(max(ZERO, min(min(pulapy), limit_ustawowy)))
 
 
 @dataclass(frozen=True)
@@ -109,7 +175,14 @@ def przelicz(w: Wejscie) -> Wynik:
         finansowanie_zwrotne=False,
     )
 
-    fin = _projekcja.zbuduj_finansowanie(w, a, g)
+    if w.przelaczniki.tryb_kredytu is TrybKredytu.AUTOMATYCZNY:
+        kwota_kredytu = kredyt_maksymalny_obslugiwalny(
+            w, a, g, limity_spoleczna, limity_komunalna
+        )
+    else:
+        kwota_kredytu = None
+
+    fin = _projekcja.zbuduj_finansowanie(w, a, g, kwota_kredytu=kwota_kredytu)
     proj = _projekcja.build(w, a, fin, limity_spoleczna, limity_komunalna)
     edb_kredytu = _kredyt.edb_dla_harmonogramu(fin.harmonogram_kredytu, w.parametry_zewnetrzne)
     rek = _rekompensata.build(w, a, fin, proj, edb_kredytu)

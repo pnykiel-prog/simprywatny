@@ -258,7 +258,7 @@ class TestZmianaZalozenia:
         wartosci_przed = {
             "koszty_spol": komorka(przed["Alokacja"], "Koszty przedsiewziecia", 3).value,
             "grant_kom": komorka(przed["Alokacja"], "GRANT", 4).value,
-            "wklad": komorka(przed["Werdykty"], "Wklad wlasny wymagany").value,
+            "wklad": komorka(przed["Werdykty"], "WYMAGANY WKLAD WLASNY").value,
             "kn_kom": komorka(przed["Rekompensata"], "KOSZTY NETTO (KN)", 11).value,
         }
 
@@ -274,7 +274,7 @@ class TestZmianaZalozenia:
         wartosci_po = {
             "koszty_spol": komorka(po["Alokacja"], "Koszty przedsiewziecia", 3).value,
             "grant_kom": komorka(po["Alokacja"], "GRANT", 4).value,
-            "wklad": komorka(po["Werdykty"], "Wklad wlasny wymagany").value,
+            "wklad": komorka(po["Werdykty"], "WYMAGANY WKLAD WLASNY").value,
             "kn_kom": komorka(po["Rekompensata"], "KOSZTY NETTO (KN)", 11).value,
         }
         for klucz in wartosci_przed:
@@ -298,7 +298,7 @@ class TestZmianaZalozenia:
         po = openpyxl.load_workbook(recalc.przelicz(zmieniony), data_only=True)
         r = przelicz(wczytaj_yaml(DOMYKAJACY).z_udzialem_komunalnym(D("0.55")))
         assert abs(
-            komorka(po["Werdykty"], "Wklad wlasny wymagany").value
+            komorka(po["Werdykty"], "WYMAGANY WKLAD WLASNY").value
             - float(r.finansowanie.wklad_wlasny_wymagany)
         ) < 0.01
         assert abs(

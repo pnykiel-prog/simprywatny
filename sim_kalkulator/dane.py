@@ -30,13 +30,37 @@ class BladObliczenia(ValueError):
     """Silnik nie moze zwrocic wiarygodnej liczby — przerywa zamiast zgadywac."""
 
 
+class Waga(int, Enum):
+    """Istotnosc ostrzezenia — decyduje, ktore trafia do widoku glownego.
+
+    Najpierw te, ktore zmieniaja werdykt, potem te, ktore przesuwaja kwote,
+    na koncu pozostale (rozdz. 5.3 uzupelnienia specyfikacji).
+    """
+
+    ZMIENIA_WERDYKT = 3
+    ZMIENIA_KWOTE = 2
+    POZOSTALE = 1
+
+
 @dataclass(frozen=True)
 class Ostrzezenie:
-    """Sygnal, ktory nie zatrzymuje obliczenia, ale musi dotrzec do uzytkownika."""
+    """Sygnal, ktory nie zatrzymuje obliczenia, ale musi dotrzec do uzytkownika.
+
+    Niesie dwie redakcje tej samej rzeczy. `tresc` jest techniczna i idzie do
+    arkusza — z artykulami, bo arkusz czyta analityk i Bank. `tresc_potoczna`
+    idzie na ekran: mowi, co sie stalo i co z tym zrobic, bez numeru przepisu.
+    Ekran sluzy rozmowie, arkusz dokumentacji.
+    """
 
     kod: str
     tresc: str
     podstawa: str = ""
+    tresc_potoczna: str = ""
+    waga: Waga = Waga.POZOSTALE
+
+    @property
+    def dla_ekranu(self) -> str:
+        return self.tresc_potoczna or self.tresc
 
     def __str__(self) -> str:
         return f"[{self.kod}] {self.tresc}" + (f" ({self.podstawa})" if self.podstawa else "")
@@ -76,6 +100,21 @@ class UjecieKosztowInwestycyjnych(str, Enum):
     AMORTYZACJA_W_OKRESIE_POWIERZENIA = "amortyzacja_w_okresie_powierzenia"
     NAKLAD_POCZATKOWY = "naklad_poczatkowy"  # caly naklad w roku pierwszym
     POMINIETE = "pominiete"                  # tylko koszty biezace
+
+
+class TrybKredytu(str, Enum):
+    """Skad bierze sie kwota kredytu.
+
+    AUTOMATYCZNY — silnik liczy maksymalny kredyt, ktory uniesie zakladany
+    czynsz. Wskaznik pokrycia obslugi dlugu wychodzi wtedy 1,0 z konstrukcji,
+    a cale napiecie montazu przenosi sie do wymaganego wkladu wlasnego.
+
+    RECZNY — kwote wyznacza udzial docelowy podany na wejsciu. Wskaznik
+    pokrycia wraca do roli miary, ktora moze byc mniejsza albo wieksza od 1,0.
+    """
+
+    AUTOMATYCZNY = "automatyczny"
+    RECZNY = "reczny"
 
 
 class MetodaRozsadnegoZysku(str, Enum):
@@ -228,7 +267,18 @@ class Rekompensata:
 
 @dataclass(frozen=True)
 class Inwestor:
-    dostepny_wklad_wlasny: Decimal
+    """Zdolnosc kapitalowa inwestora.
+
+    `dostepny_wklad_wlasny` jest OPCJONALNY. Wymagany wklad jest wynikiem
+    obliczenia, nie jego warunkiem — deklarowana kwota sluzy wylacznie za punkt
+    odniesienia i nigdy nie blokuje przeliczenia.
+    """
+
+    dostepny_wklad_wlasny: Optional[Decimal] = None
+
+    @property
+    def zadeklarowany(self) -> bool:
+        return self.dostepny_wklad_wlasny is not None
 
 
 @dataclass(frozen=True)
@@ -244,6 +294,8 @@ class Przelaczniki:
     metoda_rozsadnego_zysku: MetodaRozsadnegoZysku = MetodaRozsadnegoZysku.KAPITAL_ZAANGAZOWANY
     # art. 5 ust. 1 pkt 2 u.f.w. — remont i przebudowa zamiast budowy (limit czynszu 5%).
     remont_i_przebudowa: bool = False
+    # Skad bierze sie kwota kredytu — patrz TrybKredytu.
+    tryb_kredytu: TrybKredytu = TrybKredytu.AUTOMATYCZNY
     # Ujecie nakladu inwestycyjnego w kosztach UOIG — patrz LUKI.md.
     koszty_inwestycyjne_w_kn: UjecieKosztowInwestycyjnych = UjecieKosztowInwestycyjnych.AMORTYZACJA
     # Czy zalozony wskaznik pustostanow obciaza takze pule komunalna. Domyslnie nie:
@@ -482,9 +534,10 @@ def zbuduj(dane: Mapping[str, Any], na_dzien: Optional[_dt.date] = None) -> Wejs
         rozsadny_zysk_kwota=zl(rzk) if rzk is not None else None,
     )
 
-    si = _sekcja(dane, "inwestor")
+    si = dane.get("inwestor") or {}
+    surowy_wklad = si.get("dostepny_wklad_wlasny")
     inwestor = Inwestor(
-        dostepny_wklad_wlasny=_kwota(si, "dostepny_wklad_wlasny", "inwestor")
+        dostepny_wklad_wlasny=zl(surowy_wklad) if surowy_wklad is not None else None
     )
 
     spr = dane.get("przelaczniki") or {}
@@ -497,6 +550,15 @@ def zbuduj(dane: Mapping[str, Any], na_dzien: Optional[_dt.date] = None) -> Wejs
         dozwolone = ", ".join(m.value for m in MetodaRozsadnegoZysku)
         raise BladWalidacji(
             f"'przelaczniki.metoda_rozsadnego_zysku' ma nieznana wartosc {metoda_surowa!r}. "
+            f"Dozwolone: {dozwolone}."
+        ) from exc
+    tryb_surowy = spr.get("tryb_kredytu", TrybKredytu.AUTOMATYCZNY.value)
+    try:
+        tryb = TrybKredytu(tryb_surowy)
+    except ValueError as exc:
+        dozwolone = ", ".join(t.value for t in TrybKredytu)
+        raise BladWalidacji(
+            f"'przelaczniki.tryb_kredytu' ma nieznana wartosc {tryb_surowy!r}. "
             f"Dozwolone: {dozwolone}."
         ) from exc
     ujecie_surowe = spr.get(
@@ -518,6 +580,7 @@ def zbuduj(dane: Mapping[str, Any], na_dzien: Optional[_dt.date] = None) -> Wejs
             spr.get("grunt_jst_liczy_sie_do_limitu_grantu", True)
         ),
         metoda_rozsadnego_zysku=metoda,
+        tryb_kredytu=tryb,
         koszty_inwestycyjne_w_kn=ujecie,
         remont_i_przebudowa=bool(spr.get("remont_i_przebudowa", False)),
         pustostany_takze_w_puli_komunalnej=bool(
@@ -587,6 +650,12 @@ def _waliduj_powierzchnie(w: Wejscie, ostrzezenia: List[Ostrzezenie]) -> None:
                     "granicy lokal dopuszczalny wylacznie dla rodzin wielodzietnych."
                 ),
                 podstawa="rozp. MIiR z 4.03.2019, Dz.U. 2019 poz. 457",
+            
+                tresc_potoczna=(
+                    f"Srednie mieszkanie wychodzi {srednie:.0f} m2. Przy dotacji z Funduszu Doplat "
+                    "mieszkania moga miec od 25 do 80 m2 — wieksze tylko dla rodzin wielodzietnych."
+                ),
+                waga=Waga.ZMIENIA_WERDYKT,
             )
         )
     if p.liczba_kondygnacji >= prawo.DZWIG_OBOWIAZKOWY_OD_KONDYGNACJI and w.koszty.dzwigi <= 0:
@@ -599,6 +668,12 @@ def _waliduj_powierzchnie(w: Wejscie, ostrzezenia: List[Ostrzezenie]) -> None:
                     "Prawdopodobne niedoszacowanie kosztow przedsiewziecia."
                 ),
                 podstawa="rozp. MIiR z 4.03.2019, Dz.U. 2019 poz. 457",
+            
+                tresc_potoczna=(
+                    "Budynek ma tyle kondygnacji, ze winda jest obowiazkowa, a w kosztach jej nie ma. "
+                    "Koszt inwestycji jest zanizony — dopisz te pozycje."
+                ),
+                waga=Waga.ZMIENIA_KWOTE,
             )
         )
 
@@ -678,6 +753,12 @@ def _waliduj_partycypacje(w: Wejscie, ostrzezenia: List[Ostrzezenie]) -> None:
                     "sprzeczne — silnik nie rozstrzyga typu umowy. Kwestia otwarta 10.2."
                 ),
                 podstawa="art. 29a ust. 2a i 2b, art. 7b ust. 1 ustawy z 26.10.1995",
+            
+                tresc_potoczna=(
+                    "Przy tym poziomie partycypacji przepisy nie sa jednoznaczne co do rodzaju umowy "
+                    "najmu. Warto to uzgodnic z prawnikiem albo wybrac poziom powyzej 15%."
+                ),
+                waga=Waga.POZOSTALE,
             )
         )
 
@@ -756,6 +837,12 @@ def _waliduj_parametry(
                     "przed naborem odswiez wszystkie."
                 ),
                 podstawa="wymog metodyczny, rozdz. 4.4 specyfikacji",
+            
+                tresc_potoczna=(
+                    "Wskazniki rynkowe pochodza sprzed ponad pol roku. Wynik bedzie orientacyjny, "
+                    "dopoki ich nie odswiezysz."
+                ),
+                waga=Waga.ZMIENIA_KWOTE,
             )
         )
     brakujace_zrodla = [
@@ -782,6 +869,12 @@ def _waliduj_parametry(
                     "wyniku nie da sie odtworzyc."
                 ),
                 podstawa="wymog metodyczny, rozdz. 4.4 specyfikacji",
+            
+                tresc_potoczna=(
+                    "Czesc wskaznikow rynkowych nie ma podanego zrodla. Bez tego nie da sie pozniej "
+                    "odtworzyc, na czym liczono."
+                ),
+                waga=Waga.POZOSTALE,
             )
         )
 
@@ -805,6 +898,13 @@ def _waliduj_przelaczniki(w: Wejscie, ostrzezenia: List[Ostrzezenie]) -> None:
                     "Do potwierdzenia w BGK. Kwestia otwarta 10.1."
                 ),
                 podstawa="art. 13 ust. 1a w zw. z art. 5a ust. 1 i 3 ustawy z 8.12.2006",
+            
+                tresc_potoczna=(
+                    "Czesc mieszkan idzie do gminy, czesc na wynajem spoleczny. Przyjeto, ze sa to dwie "
+                    "odrebne inwestycje z osobnymi wnioskami. To zalozenie — potwierdz je w Banku, "
+                    "bo zmienia wysokosc dotacji."
+                ),
+                waga=Waga.ZMIENIA_KWOTE,
             )
         )
     if w.grunt.forma.pochodzi_od_jst:
@@ -823,6 +923,12 @@ def _waliduj_przelaczniki(w: Wejscie, ostrzezenia: List[Ostrzezenie]) -> None:
                     "grantowej grunt JST jest PRZYCHODEM inwestora i obniza koszty netto."
                 ),
                 podstawa="art. 13 ust. 1 pkt 1 oraz art. 5 ust. 9 pkt 4 ustawy z 8.12.2006",
+            
+                tresc_potoczna=(
+                    "Grunt wniesiony przez gmine zmniejsza dopuszczalna dotacje. Grunt kupiony albo "
+                    "wlasny dziala odwrotnie — warto porownac oba warianty."
+                ),
+                waga=Waga.ZMIENIA_KWOTE,
             )
         )
     if pz.metoda_rozsadnego_zysku is MetodaRozsadnegoZysku.KWOTA_WPROST and (
@@ -848,6 +954,12 @@ def _waliduj_przelaczniki(w: Wejscie, ostrzezenia: List[Ostrzezenie]) -> None:
                     "testu 2. Sprawdz, co mowi projekt umowy z gmina."
                 ),
                 podstawa="zalozenie modelowe, nie przepis",
+            
+                tresc_potoczna=(
+                    "Przyjeto, ze pustostany obciazaja tylko mieszkania spoleczne, bo najemca calej "
+                    "puli komunalnej jest gmina. Sprawdz, co mowi projekt umowy z gmina."
+                ),
+                waga=Waga.POZOSTALE,
             )
         )
     ostrzezenia.append(
@@ -861,7 +973,13 @@ def _waliduj_przelaczniki(w: Wejscie, ostrzezenia: List[Ostrzezenie]) -> None:
                 "ZALOZENIE do potwierdzenia w BGK. Patrz LUKI.md."
             ),
             podstawa="art. 5 ust. 7-8 ustawy z 8.12.2006 — katalog nieprzytoczony w specyfikacji",
-        )
+        
+                tresc_potoczna=(
+                    "Sposob rozliczenia nakladu inwestycyjnego przesadza o tym, ile dotacji wolno "
+                    "przyjac. To zalozenie do potwierdzenia w Banku — potrafi odwrocic wynik."
+                ),
+                waga=Waga.ZMIENIA_WERDYKT,
+            )
     )
     ostrzezenia.append(
         Ostrzezenie(
@@ -873,5 +991,11 @@ def _waliduj_przelaczniki(w: Wejscie, ostrzezenia: List[Ostrzezenie]) -> None:
                 "przyjeta metoda jest ZALOZENIEM do potwierdzenia w Banku. Patrz LUKI.md."
             ),
             podstawa="§ 6 ust. 5 rozp. Dz.U. 2025 poz. 1897; § 12 ust. 10 rozp. Dz.U. 2021 poz. 766",
-        )
+        
+                tresc_potoczna=(
+                    "Godziwy zysk inwestora liczony jest metoda przyjeta zalozeniowo — przepisy "
+                    "wskazuja zrodlo stopy, ale nie podaja wzoru. Do potwierdzenia w Banku."
+                ),
+                waga=Waga.POZOSTALE,
+            )
     )

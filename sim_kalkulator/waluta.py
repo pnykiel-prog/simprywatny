@@ -11,7 +11,7 @@ przez jawna konwersje w `mnoz`.
 
 from __future__ import annotations
 
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
 from typing import Union
 
 Liczba = Union[int, float, str, Decimal]
@@ -46,6 +46,17 @@ def mnoz(kwota: Decimal, wskaznik: Liczba) -> Decimal:
 def grosze(kwota: Decimal) -> Decimal:
     """Zaokragla kwote do pelnych groszy — wylacznie do prezentacji i eksportu."""
     return zl(kwota).quantize(GROSZ, rounding=ROUND_HALF_UP)
+
+
+def pelne_zlote_w_dol(kwota: Decimal) -> Decimal:
+    """Zaokragla kwote w dol do pelnych zlotych.
+
+    Uzywane tam, gdzie kwota jest wynikiem dzielenia i zasila warunek progowy.
+    Bank i tak udziela kredytu w kwotach zaokraglonych, a zaokraglenie w dol
+    zostawia po wlasciwej stronie progu — bez tego wskaznik pokrycia potrafi
+    wyjsc 0,999...8 i przewrocic werdykt na dwudziestym osmym miejscu po przecinku.
+    """
+    return zl(kwota).quantize(Decimal("1"), rounding=ROUND_DOWN)
 
 
 def na_m2(kwota: Decimal, pum: Decimal) -> Decimal:

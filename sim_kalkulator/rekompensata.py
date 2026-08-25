@@ -30,6 +30,7 @@ from typing import List, Optional, Tuple
 from . import prawo
 from .alokacja import PulaKosztow
 from .dane import (
+    Waga,
     MetodaRozsadnegoZysku,
     Ostrzezenie,
     UjecieKosztowInwestycyjnych,
@@ -348,6 +349,12 @@ def build(
                     "darmowa w sensie limitu rekompensaty."
                 ),
                 podstawa="§ 7 ust. 7 rozp. Dz.U. 2025 poz. 1897",
+            
+                tresc_potoczna=(
+                    "Do limitu pomocy publicznej wlicza sie takze wsparcie z Rzadowego Funduszu "
+                    "i wartosc dokumentacji projektowej z zasobu Banku. Nie sa darmowe w sensie limitu."
+                ),
+                waga=Waga.ZMIENIA_KWOTE,
             )
         )
 
@@ -387,6 +394,12 @@ def build(
                     "Przy odczycie domyslnym byly to dwa osobne testy o roznych progach."
                 ),
                 podstawa="art. 13 ust. 1a ustawy z 8.12.2006 — kwestia otwarta 10.1",
+            
+                tresc_potoczna=(
+                    "Limit pomocy publicznej liczony jest raz, lacznie dla obu pul. Przy odczycie "
+                    "domyslnym byly to dwa osobne rachunki o roznych progach."
+                ),
+                waga=Waga.ZMIENIA_WERDYKT,
             )
         )
 
@@ -402,7 +415,13 @@ def build(
                         "inwestycyjnego i pozycje gruntowa."
                     ),
                     podstawa="art. 5 ust. 5 i 11 ustawy z 8.12.2006",
-                )
+                
+                tresc_potoczna=(
+                    "Wedlug modelu inwestycja zarabia wiecej, niz kosztuje utrzymanie uslugi. Kazda "
+                    "zlotowka dotacji jest wtedy nadwyzka — sprawdz czynsz i sposob rozliczenia nakladu."
+                ),
+                waga=Waga.ZMIENIA_WERDYKT,
+            )
             )
 
     return TestRekompensaty(

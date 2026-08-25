@@ -27,7 +27,12 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
 from . import prawo
-from .dane import FormaGruntu, MetodaRozsadnegoZysku, UjecieKosztowInwestycyjnych
+from .dane import (
+    FormaGruntu,
+    MetodaRozsadnegoZysku,
+    TrybKredytu,
+    UjecieKosztowInwestycyjnych,
+)
 from .silnik import Wynik
 from .wrazliwosc import Analiza
 from .waluta import ZERO
@@ -324,8 +329,9 @@ def _zalozenia(wb: Workbook, wynik: Wynik, rej: Rejestr) -> None:
             "zl", zrodlo="Uzywane tylko przy metodzie 'kwota_wprost'.")
 
     wiersz = _sekcja(ws, wiersz, "INWESTOR")
-    wejscie("wklad_dostepny", "Dostepny wklad wlasny", w.inwestor.dostepny_wklad_wlasny, "zl",
-            zolte=True)
+    wejscie("wklad_dostepny", "Zadeklarowany kapital inwestora (opcjonalnie)",
+            w.inwestor.dostepny_wklad_wlasny if w.inwestor.zadeklarowany else "", "zl",
+            zrodlo="Punkt odniesienia. Nie jest potrzebny do obliczenia.", zolte=True)
 
     # --- przelaczniki ---
     wiersz = _sekcja(ws, wiersz, "PRZELACZNIKI — KWESTIE OTWARTE, WARTOSCI DOMYSLNE SA ZALOZENIAMI")
@@ -785,9 +791,29 @@ def _pula(wb: Workbook, wynik: Wynik, rej: Rejestr, spoleczna: bool) -> None:
     wiersz += 1
 
     if kredyt:
-        etykieta("Kredyt SBC", "Maksimum 80% kosztow — art. 15b ust. 2 ustawy z 26.10.1995.")
-        wart(2, f"={rej[f'{p}.koszty']}*{rej['kredyt_udzial']}")
-        rej.zapisz(f"{p}.kredyt", nazwa, _bezwzgledny("B", wiersz))
+        automatyczny = wynik.wejscie.przelaczniki.tryb_kredytu is TrybKredytu.AUTOMATYCZNY
+        etykieta(
+            "Kredyt SBC",
+            "Maksymalny kredyt, ktory uniesie zakladany czynsz. Maksimum 80% kosztow."
+            if automatyczny
+            else "Kwota z udzialu docelowego. Maksimum 80% kosztow.",
+        )
+        if not automatyczny:
+            wart(2, f"={rej[f'{p}.koszty']}*{rej['kredyt_udzial']}")
+        # W trybie automatycznym formula powstaje dopiero po projekcji — potrzebuje
+        # kolumny pulapow, ktora liczy sie z przychodow i kosztow biezacych.
+        komorka_kredytu = _bezwzgledny("B", wiersz)
+        rej.zapisz(f"{p}.kredyt", nazwa, komorka_kredytu)
+        wiersz += 1
+
+        etykieta("Rata na zlotowke kredytu po karencji",
+                 "Annuita jednostkowa — rata jest liniowa wzgledem kwoty kredytu.")
+        wart(2,
+             f"=IF(({rej['kredyt_n']}-{rej['kredyt_t']})<=0,0,"
+             f"IF({rej['kredyt_rp']}=0,1/({rej['kredyt_n']}-{rej['kredyt_t']}),"
+             f"{rej['kredyt_rp']}*(1+{rej['kredyt_rp']})^({rej['kredyt_n']}-{rej['kredyt_t']})"
+             f"/((1+{rej['kredyt_rp']})^({rej['kredyt_n']}-{rej['kredyt_t']})-1)))", "0.00000000")
+        rej.zapisz(f"{p}.annuita_jednostkowa", nazwa, _bezwzgledny("B", wiersz))
         wiersz += 1
 
         etykieta("Partycypacja", "art. 29a ust. 2 ustawy z 26.10.1995.")
@@ -889,6 +915,18 @@ def _pula(wb: Workbook, wynik: Wynik, rej: Rejestr, spoleczna: bool) -> None:
     if kredyt:
         wiersz = _harmonogram(ws, wiersz, rej, p, wynik)
     wiersz = _projekcja_arkusz(ws, wiersz, rej, p, lat, kredyt, spoleczna, proj)
+
+    if kredyt and wynik.wejscie.przelaczniki.tryb_kredytu is TrybKredytu.AUTOMATYCZNY:
+        # Kwota kredytu to najmniejszy pulap ze wszystkich lat, sciety limitem
+        # ustawowym i zaokraglony w dol do pelnych zlotych — tak samo jak w silniku.
+        komorka = ws[komorka_kredytu.replace("$", "")]
+        komorka.value = (
+            f"=ROUNDDOWN(MIN(MIN({rej[f'{p}.pulapy']}),"
+            f"{rej[f'{p}.koszty']}*{rej['prawo.kredyt_max_udzial']}),0)"
+        )
+        komorka.number_format = KWOTA
+        komorka.font = Font(bold=True)
+
     ws.freeze_panes = "B5"
 
 
@@ -996,6 +1034,7 @@ def _projekcja_arkusz(
         "Przychod potencjalny", "Pustostany", "Przychod netto",
         "Eksploatacja", "Odpis remontowy", "Ubezpieczenie", "Zarzad",
         "Obsluga dlugu", "Rezerwa partycypacji", "Wymagane pokrycie", "DSCR", "Saldo",
+        "Pulap kredytu",
     ]
     for kol, tytul_kol in enumerate(naglowki, start=1):
         komorka = ws.cell(row=wiersz, column=kol, value=tytul_kol)
@@ -1053,6 +1092,18 @@ def _projekcja_arkusz(
             row=w, column=15, value=f'=IF(N{w}=0,"",G{w}/N{w})'
         ).number_format = WSKAZNIK
         ws.cell(row=w, column=16, value=f"=G{w}-N{w}-M{w}").number_format = KWOTA
+        if kredyt and rej.ma(f"{p}.annuita_jednostkowa"):
+            # Rata jest liniowa wzgledem kwoty kredytu, wiec warunek pokrycia
+            # w tym roku sprowadza sie do gornego pulapu kwoty.
+            wspolczynnik = (
+                f"IF({rok}<={rej['kredyt_t']},{rej['kredyt_rp']},"
+                f"{rej[f'{p}.annuita_jednostkowa']})"
+            )
+            ws.cell(
+                row=w, column=17,
+                value=(f"=IF({rok}>{rej['kredyt_n']},\"\",IF({wspolczynnik}<=0,\"\","
+                       f"MAX(0,(G{w}-SUM(H{w}:K{w}))/{wspolczynnik})))"),
+            ).number_format = KWOTA
         rej.zapisz_wiersz(f"{p}.proj_rok_{rok}", w)
         wiersz += 1
     ostatni = wiersz - 1
@@ -1075,6 +1126,9 @@ def _projekcja_arkusz(
     komorka.font = Font(bold=True)
     rej.zapisz(f"{p}.min_dscr", nazwa, _bezwzgledny("O", wiersz))
     wiersz += 1
+
+    if kredyt and rej.ma(f"{p}.annuita_jednostkowa"):
+        rej.zapisz(f"{p}.pulapy", nazwa, f"$Q${pierwszy}:$Q${ostatni}")
 
     ws.cell(row=wiersz, column=1, value="Lat z DSCR ponizej 1,0").font = Font(bold=True)
     komorka = ws.cell(
@@ -1457,7 +1511,7 @@ def _werdykty(wb: Workbook, wynik: Wynik, rej: Rejestr) -> None:
             komorka.font = Font(bold=True)
 
     # --- test 1 ---
-    wiersz = _sekcja(ws, wiersz, "TEST 1 — MONTAZ")
+    wiersz = _sekcja(ws, wiersz, "TEST 1 — KAPITAL (wklad wlasny jest WYNIKIEM, nie wejsciem)")
     etykieta("Koszty przedsiewziecia")
     wart(f"={rej['alok.koszty_laczne']}")
     wiersz += 1
@@ -1470,20 +1524,28 @@ def _werdykty(wb: Workbook, wynik: Wynik, rej: Rejestr) -> None:
     etykieta("Partycypacja")
     wart(f"={rej['spol.partycypacja']}+{rej['kom.partycypacja']}")
     wiersz += 1
-    etykieta("Wklad wlasny wymagany", "Jeden bilans inwestora — obie pule skladaja sie na to samo.")
+    etykieta("WYMAGANY WKLAD WLASNY",
+             "Glowna liczba wyjsciowa narzedzia. Jeden bilans inwestora — obie pule "
+             "skladaja sie na to samo zapotrzebowanie.")
     wart(f"={rej['spol.wklad']}+{rej['kom.wklad']}", KWOTA, pogrubione=True)
     rej.zapisz("werd.wklad_wymagany", "Werdykty", _bezwzgledny("B", wiersz))
     wiersz += 1
-    etykieta("Wklad wlasny dostepny")
-    wart(f"={rej['wklad_dostepny']}")
+    etykieta("Udzial wkladu w kosztach")
+    wart(f"={rej['werd.wklad_wymagany']}/{rej['alok.koszty_laczne']}", PROCENT)
     wiersz += 1
-    etykieta("LUKA KAPITALOWA")
-    wart(f"=MAX(0,{rej['werd.wklad_wymagany']}-{rej['wklad_dostepny']})", KWOTA, pogrubione=True)
+    etykieta("Wymagany wklad na m2 PUM")
+    wart(f"={rej['werd.wklad_wymagany']}/{rej['alok.pum_laczne']}", KWOTA_GROSZE)
+    wiersz += 1
+    etykieta("Zadeklarowany kapital inwestora",
+             "Opcjonalny punkt odniesienia. Pusty — narzedzie podaje sama wymagana kwote.")
+    wart(f'=IF({rej["wklad_dostepny"]}="","nie podano",{rej["wklad_dostepny"]})')
+    wiersz += 1
+    etykieta("BRAKUJACY KAPITAL")
+    wart(f'=IF({rej["wklad_dostepny"]}="",0,'
+         f'MAX(0,{rej["werd.wklad_wymagany"]}-{rej["wklad_dostepny"]}))',
+         KWOTA, pogrubione=True)
     ws.cell(row=wiersz, column=2).font = CZERWONY
     rej.zapisz("werd.luka_kapitalowa", "Werdykty", _bezwzgledny("B", wiersz))
-    wiersz += 1
-    etykieta("Luka kapitalowa na m2 PUM")
-    wart(f"={rej['werd.luka_kapitalowa']}/{rej['alok.pum_laczne']}", KWOTA_GROSZE)
     wiersz += 1
     etykieta("WERDYKT 1")
     wart(f'=IF({rej["werd.luka_kapitalowa"]}=0,"przechodzi","nie przechodzi")',
@@ -1591,7 +1653,7 @@ def _werdykty(wb: Workbook, wynik: Wynik, rej: Rejestr) -> None:
     komorka = ws.cell(
         row=wiersz, column=2,
         value=(
-            f'=IF({rej["werd.test1"]}<>"przechodzi","Test 1 — montaz: brakuje wkladu wlasnego",'
+            f'=IF({rej["werd.test1"]}<>"przechodzi","Test 1 — kapital: brakuje wkladu wlasnego",'
             f'IF({rej["werd.test2"]}<>"przechodzi","Test 2 — zdolnosc czynszowa: DSCR ponizej 1,0",'
             f'IF({rej["werd.test3"]}<>"przechodzi","Test 3 — rekompensata: nadwyzka ponad prog",'
             f'"brak — wszystkie trzy testy przechodza")))'

@@ -21,7 +21,12 @@ from .dane import Ostrzezenie, Wejscie
 from .grant import Granty
 from .projekcja import Finansowanie, Projekcja
 from .rekompensata import TestRekompensaty
-from .waluta import ZERO, na_m2
+from .waluta import ZERO, bezpieczny_iloraz, na_m2
+
+
+def _zl(kwota: Decimal) -> str:
+    """Kwota w zapisie, ktory czyta sie bez wysilku."""
+    return f"{kwota:,.0f} zl".replace(",", " ")
 
 JEDEN = Decimal(1)
 
@@ -47,38 +52,63 @@ class Werdykt:
 # ---------------------------------------------------------------------------
 
 def test_montazu(w: Wejscie, fin: Finansowanie) -> Werdykt:
-    wymagany = fin.wklad_wlasny_wymagany
-    dostepny = w.inwestor.dostepny_wklad_wlasny
-    luka = max(ZERO, wymagany - dostepny)
-    przechodzi = wymagany <= dostepny
+    """Test 1 — montaz. Wklad wlasny jest WYNIKIEM, nie wejsciem.
 
-    if przechodzi:
+    Zamiast pytac "mam tyle kapitalu, czy sie spina", narzedzie odpowiada
+    "ile kapitalu trzeba dolozyc, zeby sie spielo". Zadeklarowana zdolnosc
+    inwestora jest opcjonalnym punktem odniesienia i nigdy nie blokuje
+    obliczenia — brak deklaracji nie jest porazka testu.
+    """
+    wymagany = fin.wklad_wlasny_wymagany
+    udzial = bezpieczny_iloraz(wymagany, fin.koszty_laczne)
+    dostepny = w.inwestor.dostepny_wklad_wlasny
+
+    szczegoly = {
+        "Koszty przedsiewziecia": _zl(fin.koszty_laczne),
+        "Dotacja": _zl(fin.grant_laczny),
+        "Kredyt SBC": _zl(fin.kredyt_laczny),
+        "Partycypacja": _zl(fin.partycypacja_laczna),
+        "Wymagany wklad wlasny": _zl(wymagany),
+        "Udzial wkladu w kosztach": f"{udzial:.1%}",
+    }
+
+    if dostepny is None:
+        return Werdykt(
+            numer=1,
+            nazwa="Kapital",
+            przechodzi=True,
+            wiazace_ograniczenie=(
+                f"Zeby zrealizowac te inwestycje, trzeba wylozyc wlasnych "
+                f"{_zl(wymagany)}, czyli {udzial:.0%} kosztow."
+            ),
+            luka_opis="Wymagany wklad wlasny",
+            luka_kwota=wymagany,
+            luka_jednostka="zl",
+            szczegoly=szczegoly,
+        )
+
+    szczegoly["Zadeklarowany kapital"] = _zl(dostepny)
+    luka = max(ZERO, wymagany - dostepny)
+    if luka > ZERO:
         ograniczenie = (
-            f"Zapas wkladu wlasnego: {dostepny - wymagany:,.0f} zl "
-            f"ponad wymagane {wymagany:,.0f} zl."
-        ).replace(",", " ")
+            f"Brakuje {_zl(luka)}. Inwestycja wymaga {_zl(wymagany)}, "
+            f"a zadeklarowany kapital to {_zl(dostepny)}."
+        )
     else:
         ograniczenie = (
-            f"Wklad wlasny. Montaz wymaga {wymagany:,.0f} zl, inwestor dysponuje "
-            f"{dostepny:,.0f} zl."
-        ).replace(",", " ")
+            f"Zostaje zapas {_zl(dostepny - wymagany)}. Inwestycja wymaga "
+            f"{_zl(wymagany)} przy zadeklarowanych {_zl(dostepny)}."
+        )
 
     return Werdykt(
         numer=1,
-        nazwa="Montaz",
-        przechodzi=przechodzi,
+        nazwa="Kapital",
+        przechodzi=luka == ZERO,
         wiazace_ograniczenie=ograniczenie,
-        luka_opis="Luka kapitalowa",
-        luka_kwota=luka,
+        luka_opis="Brakujacy kapital" if luka > ZERO else "Wymagany wklad wlasny",
+        luka_kwota=luka if luka > ZERO else wymagany,
         luka_jednostka="zl",
-        szczegoly={
-            "Koszty przedsiewziecia": f"{fin.koszty_laczne:,.0f} zl".replace(",", " "),
-            "Grant": f"{fin.grant_laczny:,.0f} zl".replace(",", " "),
-            "Kredyt SBC": f"{fin.kredyt_laczny:,.0f} zl".replace(",", " "),
-            "Partycypacja": f"{fin.partycypacja_laczna:,.0f} zl".replace(",", " "),
-            "Wklad wlasny wymagany": f"{wymagany:,.0f} zl".replace(",", " "),
-            "Wklad wlasny dostepny": f"{dostepny:,.0f} zl".replace(",", " "),
-        },
+        szczegoly=szczegoly,
     )
 
 
@@ -266,9 +296,9 @@ def test_rekompensaty(rek: TestRekompensaty) -> Werdykt:
 
 @dataclass(frozen=True)
 class Werdykty:
-    montaz: Werdykt
-    zdolnosc_czynszowa: Werdykt
-    rekompensata: Werdykt
+    montaz: Werdykt              # Test 1 — Kapital
+    zdolnosc_czynszowa: Werdykt  # Test 2 — Czynsz
+    rekompensata: Werdykt        # Test 3 — Rekompensata
 
     @property
     def wszystkie(self) -> Tuple[Werdykt, ...]:

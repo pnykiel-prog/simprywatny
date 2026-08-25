@@ -109,9 +109,14 @@ def porownaj_z_silnikiem(plik: Path, wejscie: Path) -> List[str]:
         ("Pula_komunalna", "Wklad wlasny", 2, float(r.finansowanie.komunalna.wklad_wlasny)),
         ("Pula_spoleczna", "LIMIT WIAZACY", 2, float(r.limity_spoleczna.limit_wiazacy_m2_mies)),
         ("Pula_komunalna", "LIMIT WIAZACY", 2, float(r.limity_komunalna.limit_wiazacy_m2_mies)),
-        ("Werdykty", "Wklad wlasny wymagany", 2, float(r.finansowanie.wklad_wlasny_wymagany)),
-        ("Werdykty", "LUKA KAPITALOWA", 2, float(r.werdykty.montaz.luka_kwota)),
+        ("Werdykty", "WYMAGANY WKLAD WLASNY", 2, float(r.finansowanie.wklad_wlasny_wymagany)),
     ]
+    dostepny = r.wejscie.inwestor.dostepny_wklad_wlasny
+    if dostepny is not None:
+        kontrole.append((
+            "Werdykty", "BRAKUJACY KAPITAL", 2,
+            float(max(0, r.finansowanie.wklad_wlasny_wymagany - dostepny)),
+        ))
     if r.projekcja.spoleczna.minimalny_dscr is not None:
         kontrole.append(
             ("Pula_spoleczna", "Minimalny DSCR", 15, float(r.projekcja.spoleczna.minimalny_dscr))

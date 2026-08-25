@@ -75,10 +75,20 @@ class Finansowanie:
         return self.spoleczna.wklad_wlasny + self.komunalna.wklad_wlasny
 
 
-def zbuduj_finansowanie(w: Wejscie, a: Alokacja, g: Granty) -> Finansowanie:
-    """Sklada zrodla finansowania kazdej puli; wklad wlasny domyka reszte."""
+def zbuduj_finansowanie(
+    w: Wejscie, a: Alokacja, g: Granty, kwota_kredytu: Optional[Decimal] = None
+) -> Finansowanie:
+    """Sklada zrodla finansowania kazdej puli; wklad wlasny domyka reszte.
+
+    `kwota_kredytu` podana wprost pochodzi z wyliczenia maksymalnego kredytu
+    obslugiwalnego (tryb automatyczny). Pominieta — kwote wyznacza udzial
+    docelowy z wejscia (tryb reczny).
+    """
     # Pula spoleczna — grant, kredyt SBC, partycypacja, wklad wlasny.
-    kwota_kredytu = a.spoleczna.koszty_przedsiewziecia * w.pula_spoleczna.kredyt.udzial_docelowy
+    if kwota_kredytu is None:
+        kwota_kredytu = (
+            a.spoleczna.koszty_przedsiewziecia * w.pula_spoleczna.kredyt.udzial_docelowy
+        )
     # art. 29a ust. 2 ustawy z 26.10.1995 mowi o koszcie budowy lokalu; model liczy
     # go jako koszt przedsiewziecia przypadajacy na lokale tej puli (z udzialem
     # w kosztach wspolnych), zgodnie z metodyka "wszystko per m2 PUM".

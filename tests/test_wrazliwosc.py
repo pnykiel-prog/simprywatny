@@ -43,21 +43,21 @@ class TestZakresSweepu:
 
 class TestPunktGraniczny:
     def test_maksymalny_udzial_i_punkt_graniczny(self, sweep_domykajacy):
-        assert sweep_domykajacy.maksymalny_udzial_komunalny == D("0.55")
-        assert sweep_domykajacy.punkt_graniczny == D("0.60")
+        assert sweep_domykajacy.maksymalny_udzial_komunalny == D("0.80")
+        assert sweep_domykajacy.punkt_graniczny == D("0.85")
 
     def test_ponizej_granicy_wszystko_przechodzi(self, sweep_domykajacy):
         for punkt in sweep_domykajacy.punkty:
-            if punkt.udzial <= D("0.55"):
+            if punkt.udzial <= D("0.80"):
                 assert punkt.domyka_sie is True, punkt.udzial
 
     def test_powyzej_granicy_blokuje_test_montazu(self, sweep_domykajacy):
-        powyzej = [p for p in sweep_domykajacy.punkty if D("0.60") <= p.udzial <= D("0.95")]
+        powyzej = [p for p in sweep_domykajacy.punkty if D("0.85") <= p.udzial <= D("0.95")]
         assert powyzej
         for punkt in powyzej:
             assert punkt.domyka_sie is False
-            assert punkt.werdykty[0] is False      # test 1 — montaz
-            assert punkt.werdykty[1] is True       # test 2 wciaz przechodzi
+            assert punkt.werdykty[0] is False      # test 1 — kapital
+            assert punkt.werdykty[1] is True       # test 2 przechodzi z konstrukcji
 
     def test_luka_kapitalowa_rosnie_z_udzialem_komunalnym(self, sweep_domykajacy):
         # Kazdy metr przesuniety do puli komunalnej traci dzwignie kredytowa
@@ -81,11 +81,11 @@ class TestBrakDomkniecia:
     def test_gdy_nic_nie_domyka_wskazywany_jest_test_blokujacy(self, sweep_wzorcowy):
         assert sweep_wzorcowy.maksymalny_udzial_komunalny is None
         assert sweep_wzorcowy.punkt_graniczny is None
-        assert sweep_wzorcowy.test_blokujacy == 2
+        assert sweep_wzorcowy.test_blokujacy == 3
 
-    def test_wzorcowy_blokuje_zdolnosc_czynszowa_w_calym_zakresie(self, sweep_wzorcowy):
+    def test_wzorcowy_blokuje_rekompensate_w_calym_zakresie(self, sweep_wzorcowy):
         policzalne = [p for p in sweep_wzorcowy.punkty if p.policzalny]
-        assert all(p.werdykty[1] is False for p in policzalne if p.udzial < D("1.0"))
+        assert all(p.werdykty[2] is False for p in policzalne if p.udzial < D("1.0"))
 
 
 class TestPunktyNiepoliczalne:
@@ -167,13 +167,13 @@ class TestWrazliwoscJednoparametrowa:
 class TestAnalizaZbiorcza:
     def test_podsumowanie_podaje_granice_w_procentach(self):
         a = wrazliwosc.build(wczytaj_yaml(DOMYKAJACY), krok=D("0.05"))
-        assert "55%" in a.podsumowanie
-        assert "60%" in a.podsumowanie
+        assert "80%" in a.podsumowanie
+        assert "85%" in a.podsumowanie
 
     def test_podsumowanie_braku_domkniecia_wskazuje_test(self):
         a = wrazliwosc.build(wczytaj_yaml(wspolne.WZORCOWY), krok=D("0.25"))
         assert "nie domyka sie przy zadnym udziale" in a.podsumowanie
-        assert "test 2" in a.podsumowanie
+        assert "test 3" in a.podsumowanie
 
     def test_analiza_zawiera_sweep_i_ranking(self):
         a = wrazliwosc.build(wczytaj_yaml(DOMYKAJACY), krok=D("0.25"))
@@ -204,7 +204,7 @@ class TestPunktPrzelamania:
             assert r.przelamuje is False
 
     def test_wariant_bez_domkniecia_wskazuje_wartosc_przelamania(self):
-        a = self.wariant(10500.0)
+        a = self.wariant(12500.0)
         assert a.sweep.maksymalny_udzial_komunalny is None
         koszt = next(r for r in a.wrazliwosc if r.nazwa == "Koszt budowy na m2")
         assert koszt.przelamanie_zbadane is True
@@ -217,7 +217,7 @@ class TestPunktPrzelamania:
         # rzeczywiscie znajduje punkt domkniecia.
         from sim_kalkulator.dane import zbuduj
 
-        a = self.wariant(10500.0)
+        a = self.wariant(12500.0)
         koszt = next(r for r in a.wrazliwosc if r.nazwa == "Koszt budowy na m2")
         dane = wspolne.zmien(koszty__koszt_budowy_na_m2=float(koszt.przelamanie_wartosc))
         dane["przelaczniki"]["koszty_inwestycyjne_w_kn"] = "naklad_poczatkowy"
@@ -230,12 +230,12 @@ class TestPunktPrzelamania:
     def test_szuka_najtanszej_zmiany(self):
         # Mnozniki badane od najblizszego wartosci bazowej, wiec znaleziona
         # zmiana jest najmniejsza z mozliwych w siatce.
-        a = self.wariant(10500.0)
+        a = self.wariant(12500.0)
         koszt = next(r for r in a.wrazliwosc if r.nazwa == "Koszt budowy na m2")
         assert abs(koszt.przelamanie_zmiana) <= wrazliwosc.PRZELAMANIE_ZASIEG
 
     def test_ranking_stawia_najtansza_dzwignie_pierwsza(self):
-        a = self.wariant(10500.0)
+        a = self.wariant(12500.0)
         przelamujace = [r for r in a.ranking if r.przelamuje]
         assert przelamujace, "zaden parametr nie przelamuje — brak czego rankingowac"
         koszty = [r.koszt_przelamania for r in przelamujace]
@@ -244,7 +244,7 @@ class TestPunktPrzelamania:
 
     def test_opis_dzwigni_zawsze_cos_mowi(self):
         # Pusta komorka w rankingu jest bezuzyteczna — kazdy wiersz ma niesc tresc.
-        for koszt_budowy in (7500.0, 10500.0):
+        for koszt_budowy in (7500.0, 12500.0):
             for r in self.wariant(koszt_budowy).ranking:
                 assert r.opis_dzwigni.strip()
                 assert r.opis_dzwigni != "nieokreslony"

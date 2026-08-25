@@ -29,7 +29,7 @@ class TestWerdyktZbiorczy:
         assert len(r.werdykty.wszystkie) == 3
         assert [t.numer for t in r.werdykty.wszystkie] == [1, 2, 3]
         assert [t.nazwa for t in r.werdykty.wszystkie] == [
-            "Montaz", "Zdolnosc czynszowa", "Rekompensata"
+            "Kapital", "Zdolnosc czynszowa", "Rekompensata"
         ]
 
     def test_kazdy_werdykt_negatywny_podaje_wiazace_ograniczenie(self):
@@ -49,8 +49,106 @@ class TestWerdyktZbiorczy:
         assert r.werdykty.wiazace_ograniczenie.startswith("Test ")
 
 
+def reczny(**zmiany):
+    """Wynik w trybie recznym — kredyt z udzialu docelowego, jak przed zmiana.
+
+    W trybie automatycznym wskaznik pokrycia wychodzi 1,0 z konstrukcji, wiec
+    porazki testu 2 nie da sie tam wywolac. Tryb reczny zostaje wlasnie po to.
+    """
+    dane = wspolne.zmien(**zmiany)
+    dane["przelaczniki"]["tryb_kredytu"] = "reczny"
+    from sim_kalkulator.dane import zbuduj
+
+    return przelicz(zbuduj(dane, na_dzien=wspolne.DATA_ODNIESIENIA))
+
+
 class TestMontazu:
-    """grant + kredyt + partycypacja + wklad wlasny = koszty przedsiewziecia"""
+    """Wklad wlasny jest WYNIKIEM: koszty - dotacja - kredyt - partycypacja."""
+
+    def test_wklad_jest_reszta_po_zrodlach_obcych(self):
+        f = wynik().finansowanie
+        assert f.wklad_wlasny_wymagany == (
+            f.koszty_laczne - f.grant_laczny - f.kredyt_laczny - f.partycypacja_laczna
+        )
+
+    def test_bez_deklaracji_kapitalu_test_przechodzi_i_podaje_kwote(self):
+        # Zdolnosc inwestora nigdy nie blokuje obliczenia (rozdz. 2.3).
+        dane = wspolne.zmien()
+        dane["inwestor"].pop("dostepny_wklad_wlasny")
+        from sim_kalkulator.dane import zbuduj
+
+        r = przelicz(zbuduj(dane, na_dzien=wspolne.DATA_ODNIESIENIA))
+        t = r.werdykty.montaz
+        assert t.przechodzi is True
+        assert t.luka_opis == "Wymagany wklad wlasny"
+        assert t.luka_kwota == r.finansowanie.wklad_wlasny_wymagany
+        assert "trzeba wylozyc wlasnych" in t.wiazace_ograniczenie
+
+    def test_brak_deklaracji_nie_jest_bledem_walidacji(self):
+        dane = wspolne.zmien()
+        dane["inwestor"].pop("dostepny_wklad_wlasny")
+        from sim_kalkulator.dane import zbuduj
+
+        w = zbuduj(dane, na_dzien=wspolne.DATA_ODNIESIENIA)
+        assert w.inwestor.zadeklarowany is False
+
+    def test_deklaracja_dodaje_odniesienie_nie_zmieniajac_wymaganej_kwoty(self):
+        bez = wspolne.zmien()
+        bez["inwestor"].pop("dostepny_wklad_wlasny")
+        from sim_kalkulator.dane import zbuduj
+
+        r_bez = przelicz(zbuduj(bez, na_dzien=wspolne.DATA_ODNIESIENIA))
+        r_z = wynik(inwestor__dostepny_wklad_wlasny=100000.0)
+        assert r_bez.finansowanie.wklad_wlasny_wymagany == (
+            r_z.finansowanie.wklad_wlasny_wymagany
+        )
+        assert r_z.werdykty.montaz.przechodzi is False
+
+
+class TestKredytAutomatyczny:
+    """Rozdz. 2.2 — kredyt liczony, nie wpisywany. Pokrycie 1,0 z konstrukcji."""
+
+    def test_wskaznik_pokrycia_wychodzi_jeden(self):
+        r = wynik()
+        assert r.projekcja.spoleczna.minimalny_dscr >= D("1")
+        assert r.projekcja.spoleczna.minimalny_dscr < D("1.001")
+
+    def test_test_czynszowy_przechodzi_z_konstrukcji(self):
+        assert wynik().werdykty.zdolnosc_czynszowa.przechodzi is True
+
+    def test_kredyt_nie_przekracza_limitu_ustawowego(self):
+        r = wynik(pula_spoleczna__czynsz_zakladany_m2_mies=30.0)
+        udzial = r.finansowanie.spoleczna.kredyt / r.alokacja.spoleczna.koszty_przedsiewziecia
+        assert udzial <= D("0.80")
+
+    def test_wyzszy_czynsz_uniesie_wiekszy_kredyt(self):
+        niski = wynik(pula_spoleczna__czynsz_zakladany_m2_mies=18.0)
+        wysoki = wynik(pula_spoleczna__czynsz_zakladany_m2_mies=26.0)
+        assert wysoki.finansowanie.spoleczna.kredyt > niski.finansowanie.spoleczna.kredyt
+
+    def test_wyzszy_kredyt_obniza_wymagany_wklad(self):
+        niski = wynik(pula_spoleczna__czynsz_zakladany_m2_mies=18.0)
+        wysoki = wynik(pula_spoleczna__czynsz_zakladany_m2_mies=26.0)
+        assert wysoki.finansowanie.wklad_wlasny_wymagany < niski.finansowanie.wklad_wlasny_wymagany
+
+    def test_kwota_kredytu_zaokraglona_do_pelnych_zlotych(self):
+        # Bez tego wskaznik pokrycia potrafi wyjsc 0,999...8 i przewrocic werdykt.
+        kwota = wynik().finansowanie.spoleczna.kredyt
+        assert kwota == kwota.to_integral_value()
+
+    def test_tryb_reczny_wraca_do_udzialu_docelowego(self):
+        r = reczny(pula_spoleczna__kredyt__udzial_docelowy=0.40)
+        assert r.finansowanie.spoleczna.kredyt == (
+            r.alokacja.spoleczna.koszty_przedsiewziecia * D("0.40")
+        )
+
+    def test_tryb_reczny_pozwala_oblac_test_czynszowy(self):
+        r = reczny(pula_spoleczna__kredyt__udzial_docelowy=0.80)
+        assert r.projekcja.spoleczna.minimalny_dscr < D("1")
+        assert r.werdykty.zdolnosc_czynszowa.przechodzi is False
+
+
+class TestMontazuSzczegoly:
 
     def test_zrodla_sumuja_sie_do_kosztow(self):
         r = wynik()
@@ -60,65 +158,64 @@ class TestMontazu:
             + f.wklad_wlasny_wymagany
         ) == f.koszty_laczne
 
-    def test_przechodzi_gdy_wklad_wystarcza(self):
+    def test_przechodzi_gdy_kapital_wystarcza(self):
         r = wynik(inwestor__dostepny_wklad_wlasny=50000000.0)
         assert r.werdykty.montaz.przechodzi is True
-        assert r.werdykty.montaz.luka_kwota == D("0")
+        assert "Zostaje zapas" in r.werdykty.montaz.wiazace_ograniczenie
 
-    def test_luka_kapitalowa_gdy_wkladu_brakuje(self):
-        r = wynik(
-            powierzchnie__udzial_puli_komunalnej=0.9,
-            pula_spoleczna__kredyt__udzial_docelowy=0.0,
-            inwestor__dostepny_wklad_wlasny=100000.0,
-        )
+    def test_luka_kapitalowa_gdy_kapitalu_brakuje(self):
+        r = wynik(inwestor__dostepny_wklad_wlasny=100000.0)
         t = r.werdykty.montaz
         assert t.przechodzi is False
         assert t.luka_jednostka == "zl"
-        assert t.luka_kwota == (
-            r.finansowanie.wklad_wlasny_wymagany - D("100000.0")
-        )
+        assert t.luka_opis == "Brakujacy kapital"
+        assert t.luka_kwota == r.finansowanie.wklad_wlasny_wymagany - D("100000.0")
+        assert "Brakuje" in t.wiazace_ograniczenie
 
     def test_szczegoly_pokazuja_wszystkie_zrodla(self):
         t = wynik().werdykty.montaz
-        for klucz in ("Grant", "Kredyt SBC", "Partycypacja", "Wklad wlasny wymagany"):
+        for klucz in ("Dotacja", "Kredyt SBC", "Partycypacja", "Wymagany wklad wlasny"):
             assert klucz in t.szczegoly
 
 
 class TestZdolnosciCzynszowej:
     def test_porazka_wskazuje_rok_pierwszego_naruszenia(self):
-        r = wynik()
+        r = reczny(pula_spoleczna__kredyt__udzial_docelowy=0.80)
         t = r.werdykty.zdolnosc_czynszowa
         assert t.przechodzi is False
-        assert "roku 4" in t.wiazace_ograniczenie
-        assert t.szczegoly["Rok pierwszego naruszenia"] == "4"
+        rok = r.projekcja.spoleczna.pierwszy_rok_naruszenia
+        assert t.szczegoly["Rok pierwszego naruszenia"] == str(rok)
 
     def test_luka_podana_w_zl_na_m2_na_miesiac(self):
-        t = wynik().werdykty.zdolnosc_czynszowa
+        t = reczny(pula_spoleczna__kredyt__udzial_docelowy=0.80).werdykty.zdolnosc_czynszowa
         assert t.luka_jednostka == "zl/m2/mies."
         assert t.luka_kwota > D("0")
 
     def test_raportuje_czynsz_wymagany_limit_i_rynek(self):
         # Rozjazd miedzy limitem a poziomem potrzebnym do domkniecia to
         # centralne napiecie modelu i ma byc widoczny wprost.
-        t = wynik().werdykty.zdolnosc_czynszowa
+        t = reczny(pula_spoleczna__kredyt__udzial_docelowy=0.80).werdykty.zdolnosc_czynszowa
         klucze = " ".join(t.szczegoly)
         assert "Czynsz wymagany do domkniecia" in klucze
         assert "Limit czynszu" in klucze
         assert "Czynsz rynkowy" in klucze
 
-    def test_bez_kredytu_test_przechodzi_latwiej(self):
-        r = wynik(pula_spoleczna__kredyt__udzial_docelowy=0.0)
+    def test_bez_kredytu_test_przechodzi_trywialnie(self):
+        r = reczny(pula_spoleczna__kredyt__udzial_docelowy=0.0)
         assert r.werdykty.zdolnosc_czynszowa.przechodzi is True
 
     def test_dscr_ponizej_jednosci_to_porazka(self):
-        r = wynik()
+        r = reczny(pula_spoleczna__kredyt__udzial_docelowy=0.80)
         assert r.projekcja.spoleczna.minimalny_dscr < D("1")
         assert r.werdykty.zdolnosc_czynszowa.przechodzi is False
 
-    def test_wyzsze_pustostany_pogarszaja_werdykt(self):
+    def test_wyzsze_pustostany_zmniejszaja_udzwig_kredytowy(self):
+        # W trybie automatycznym pustostany nie psuja pokrycia — obnizaja kwote
+        # kredytu, ktora czynsz jest w stanie uniesc, i podnosza wymagany wklad.
         malo = wynik(eksploatacja__pustostany_procent=0.02)
         duzo = wynik(eksploatacja__pustostany_procent=0.20)
-        assert duzo.projekcja.spoleczna.minimalny_dscr < malo.projekcja.spoleczna.minimalny_dscr
+        assert duzo.finansowanie.spoleczna.kredyt < malo.finansowanie.spoleczna.kredyt
+        assert duzo.finansowanie.wklad_wlasny_wymagany > malo.finansowanie.wklad_wlasny_wymagany
 
 
 class TestRekompensaty:
@@ -184,23 +281,27 @@ class TestWskaznikiNaM2:
 
 
 class TestRegresjaPrzykladow:
-    """Zamrozone werdykty przykladow — zmiana silnika, ktora je przesuwa, ma wysypac testy."""
+    """Zamrozone werdykty przykladow — zmiana silnika, ktora je przesuwa, ma wysypac testy.
 
-    def test_wzorcowy_nie_domyka_sie_i_wiaze_test_2(self):
+    Wartosci przemrozone po przebudowie warstwy interakcji: kredyt liczony
+    automatycznie, wklad wlasny jako wynik.
+    """
+
+    def test_wzorcowy_nie_domyka_sie_i_wiaze_rekompensata(self):
         r = przelicz(wczytaj_yaml(wspolne.WZORCOWY))
         assert r.domyka_sie is False
         assert r.werdykty.montaz.przechodzi is True
-        assert r.werdykty.zdolnosc_czynszowa.przechodzi is False
+        assert r.werdykty.zdolnosc_czynszowa.przechodzi is True
         assert r.werdykty.rekompensata.przechodzi is False
-        assert r.werdykty.wiazace_ograniczenie.startswith("Test 2")
+        assert r.werdykty.wiazace_ograniczenie.startswith("Test 3")
 
     def test_wzorcowy_zamrozone_liczby(self):
         r = przelicz(wczytaj_yaml(wspolne.WZORCOWY))
         assert r.alokacja.koszty_laczne == D("29050000.00")
-        assert r.finansowanie.wklad_wlasny_wymagany == D("799750.00")
+        assert r.finansowanie.spoleczna.kredyt == D("7606633")
+        assert r.finansowanie.wklad_wlasny_wymagany == D("1327117.00")
         assert r.granty.spoleczna.udzial_wsparcia.quantize(D("0.0001")) == D("0.4464")
         assert r.granty.komunalna.udzial_wsparcia == D("0.80")
-        assert r.projekcja.spoleczna.pierwszy_rok_naruszenia == 4
 
     def test_domykajacy_sie_przechodzi_wszystkie_trzy(self):
         r = przelicz(wczytaj_yaml(wspolne.KATALOG_PRZYKLADOW / "domykajacy_sie.yaml"))
@@ -210,13 +311,17 @@ class TestRegresjaPrzykladow:
     def test_domykajacy_sie_zamrozone_liczby(self):
         r = przelicz(wczytaj_yaml(wspolne.KATALOG_PRZYKLADOW / "domykajacy_sie.yaml"))
         assert r.alokacja.koszty_laczne == D("29050000.00")
-        assert r.finansowanie.wklad_wlasny_wymagany == D("3850000.00")
+        assert r.finansowanie.spoleczna.kredyt == D("7536579")
+        assert r.finansowanie.wklad_wlasny_wymagany == D("1397171.00")
         assert r.projekcja.spoleczna.pierwszy_rok_naruszenia is None
-        assert r.projekcja.spoleczna.minimalny_dscr.quantize(D("0.001")) == D("1.286")
 
     def test_oba_przyklady_maja_te_same_koszty_a_inny_werdykt(self):
-        # O werdykcie decyduje struktura finansowania, nie skala projektu.
         a = przelicz(wczytaj_yaml(wspolne.WZORCOWY))
         b = przelicz(wczytaj_yaml(wspolne.KATALOG_PRZYKLADOW / "domykajacy_sie.yaml"))
         assert a.alokacja.koszty_laczne == b.alokacja.koszty_laczne
         assert a.domyka_sie != b.domyka_sie
+
+    def test_pokrycie_wychodzi_jeden_w_obu_przykladach(self):
+        for plik in (wspolne.WZORCOWY, wspolne.KATALOG_PRZYKLADOW / "domykajacy_sie.yaml"):
+            r = przelicz(wczytaj_yaml(plik))
+            assert r.projekcja.spoleczna.minimalny_dscr >= D("1")
