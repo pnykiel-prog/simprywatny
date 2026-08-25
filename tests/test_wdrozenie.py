@@ -86,34 +86,62 @@ class TestStrukturaKatalogu:
         assert (API / "index.py").exists()
 
 
+def rozwiaz_trase(sciezka):
+    """Odwzorowuje trasowanie z vercel.json: sciezka HTTP -> plik funkcji."""
+    trasy = [(re.compile("^" + r["src"] + "$"), r["dest"]) for r in konfiguracja()["routes"]]
+    for wzorzec, cel in trasy:
+        dopasowanie = wzorzec.match(sciezka)
+        if dopasowanie:
+            wynik = cel
+            for numer, grupa in enumerate(dopasowanie.groups(), start=1):
+                wynik = wynik.replace("$%d" % numer, grupa or "")
+            return wynik
+    return None
+
+
 class TestKonfiguracja:
     def test_vercel_json_jest_poprawnym_jsonem(self):
         assert isinstance(konfiguracja(), dict)
 
-    def test_korzen_prowadzi_do_strony(self):
-        zrodla = {r["source"]: r["destination"] for r in konfiguracja()["rewrites"]}
-        assert zrodla.get("/") == "/api/index"
+    def test_runtime_pythona_jest_wymuszony_a_nie_wykrywany(self):
+        # Blok `functions` polega na tym, ze platforma sama rozpozna api/*.py
+        # jako funkcje. Gdy tego nie robi, build konczy sie bledem
+        # "doesn't match any Serverless Functions inside the api directory".
+        # `builds` wskazuje runtime wprost, wiec wykrywanie nie jest potrzebne.
+        cfg = konfiguracja()
+        assert "functions" not in cfg
+        budowanie = cfg["builds"]
+        assert len(budowanie) == 1
+        assert budowanie[0]["src"] == "api/*.py"
+        assert budowanie[0]["use"] == "@vercel/python"
 
     def test_konfiguracja_nie_przestawia_katalogu_wyjsciowego(self):
-        # `outputDirectory` przesuwa katalog, w ktorym platforma szuka funkcji,
-        # przez co `api/` w korzeniu przestaje byc widoczne i build konczy sie
-        # bledem "pattern doesn't match any Serverless Functions".
+        # `outputDirectory` przesuwa katalog, w ktorym platforma szuka funkcji.
         assert "outputDirectory" not in konfiguracja()
 
     def test_include_files_pokrywa_katalogi_czasu_dzialania(self):
-        # Blok `functions` sluzy wylacznie temu, zeby pliki spoza api/ trafily
-        # do paczki funkcji. Sam w sobie buildu nie psuje — psulo go
-        # outputDirectory, ktore przestawialo katalog poszukiwan.
-        wzorzec = konfiguracja()["functions"]["api/*.py"]["includeFiles"]
-        objete = {w.strip().split("/")[0] for w in wzorzec.strip("{}").split(",")}
+        objete = {
+            w.split("/")[0] for w in konfiguracja()["builds"][0]["config"]["includeFiles"]
+        }
         assert objete >= set(KATALOGI_CZASU_DZIALANIA)
 
-    def test_wzorzec_funkcji_pasuje_do_istniejacych_plikow(self):
-        # Wzorzec, ktory nic nie lapie, przerywa build komunikatem
-        # "doesn't match any Serverless Functions inside the api directory".
-        wzorzec = next(iter(konfiguracja()["functions"]))
-        assert wzorzec == "api/*.py"
-        assert list(API.glob("*.py")), "wzorzec api/*.py nie lapie zadnego pliku"
+    def test_kazda_trasa_z_ui_trafia_w_istniejacy_plik_funkcji(self):
+        html = (KORZEN / "web" / "index.html").read_text(encoding="utf-8")
+        wolane = set(re.findall(r'api\("/api/(\w+)"', html))
+        assert wolane, "UI nie wola zadnego endpointu"
+        for trasa in wolane | {"diag"}:
+            cel = rozwiaz_trase("/api/" + trasa)
+            assert cel is not None, f"/api/{trasa} nie ma trasy"
+            assert (KORZEN / cel.lstrip("/")).exists(), f"{cel} nie istnieje"
+
+    def test_korzen_prowadzi_do_strony(self):
+        assert rozwiaz_trase("/") == "/api/index.py"
+
+    def test_trasa_api_ma_pierwszenstwo_przed_lapaczem(self):
+        # Kolejnosc w `routes` decyduje: gdyby lapacz byl pierwszy, wszystkie
+        # wywolania API konczylyby sie strona HTML zamiast JSON-em.
+        assert rozwiaz_trase("/api/przelicz") == "/api/przelicz.py"
+        assert rozwiaz_trase("/cokolwiek") == "/api/index.py"
 
     def test_vercelignore_nie_wyklucza_niczego_potrzebnego(self):
         wykluczone = {

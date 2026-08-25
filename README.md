@@ -69,21 +69,31 @@ api/arkusz.py      →  /api/arkusz
 api/diag.py        →  /api/diag      funkcja serwisowa — stan paczki funkcji
 ```
 
-### Konfiguracja `vercel.json` — dwie rzeczy naraz
+### Konfiguracja `vercel.json` — runtime wymuszony, nie wykrywany
 
-Funkcje potrzebują trzech katalogów spoza `api/`: `sim_kalkulator/`,
-`web/index.html` i `przyklady/`. Dokłada je `includeFiles` w bloku `functions`.
-
-**`outputDirectory` musi pozostać nieustawione.** Przesuwa katalog, w którym
-platforma szuka funkcji, przez co `api/` w korzeniu przestaje być widoczne,
-a build kończy się błędem:
+Konfiguracja używa `builds` z `@vercel/python`, a nie nowszego bloku
+`functions`. Powód jest konkretny: `functions` polega na tym, że platforma sama
+rozpozna `api/*.py` jako funkcje. W tym projekcie tego nie robiła i build
+kończył się błędem:
 
 ```
 The pattern "api/*.py" defined in `functions` doesn't match any
 Serverless Functions inside the `api` directory
 ```
 
-Pilnuje tego test `test_konfiguracja_nie_przestawia_katalogu_wyjsciowego`.
+`builds` wskazuje runtime wprost, więc wykrywanie nie jest potrzebne.
+`config.includeFiles` dokłada do paczki trzy katalogi spoza `api/`, których
+funkcje potrzebują: `sim_kalkulator/`, `przyklady/` i `web/`.
+
+`routes` odwzorowuje `/api/<nazwa>` na `api/<nazwa>.py`, a wszystko pozostałe
+na `api/index.py`. Kolejność ma znaczenie — gdyby łapacz był pierwszy, każde
+wywołanie API zwracałoby stronę HTML zamiast JSON-a. Pilnują tego testy
+`test_kazda_trasa_z_ui_trafia_w_istniejacy_plik_funkcji`
+i `test_trasa_api_ma_pierwszenstwo_przed_lapaczem`.
+
+Jeśli build nadal nie widzi funkcji, sprawdź w ustawieniach projektu na Vercelu
+**Root Directory** — musi wskazywać korzeń repozytorium, nie podkatalog.
+Konfiguracja w repozytorium tego nie nadpisze.
 
 ### Strażnik startu funkcji
 

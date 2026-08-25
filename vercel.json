@@ -1,12 +1,16 @@
 {
-  "$schema": "https://openapi.vercel.sh/vercel.json",
-  "rewrites": [
-    { "source": "/", "destination": "/api/index" },
-    { "source": "/index.html", "destination": "/api/index" }
-  ],
-  "functions": {
-    "api/*.py": {
-      "includeFiles": "{sim_kalkulator/**,przyklady/**,web/**}"
+  "version": 2,
+  "builds": [
+    {
+      "src": "api/*.py",
+      "use": "@vercel/python",
+      "config": {
+        "includeFiles": ["sim_kalkulator/**", "przyklady/**", "web/**"]
+      }
     }
-  }
+  ],
+  "routes": [
+    { "src": "/api/([^/]+)/?", "dest": "/api/$1.py" },
+    { "src": "/(.*)", "dest": "/api/index.py" }
+  ]
 }
