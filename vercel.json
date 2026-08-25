@@ -1,9 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "outputDirectory": "web",
-  "functions": {
-    "api/*.py": {
-      "includeFiles": "{sim_kalkulator/**,przyklady/**,web/**}"
-    }
-  }
+  "rewrites": [
+    { "source": "/", "destination": "/api/index" },
+    { "source": "/index.html", "destination": "/api/index" }
+  ]
 }

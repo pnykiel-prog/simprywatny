@@ -28,10 +28,11 @@ def konfiguracja():
     return json.loads((KORZEN / "vercel.json").read_text(encoding="utf-8"))
 
 
-def wzorce_include():
-    """Katalogi, ktore vercel.json kaze dolozyc do paczki funkcji."""
-    wzorzec = konfiguracja()["functions"]["api/*.py"]["includeFiles"]
-    return [w.strip().split("/")[0] for w in wzorzec.strip("{}").split(",")]
+# Katalogi spoza `api/`, ktorych funkcje potrzebuja w czasie dzialania:
+# pakiet silnika, plik interfejsu i parametry bazowe. Jezeli ktorykolwiek nie
+# trafi do paczki funkcji, wdrozenie wywala sie w czasie dzialania, nie przy
+# budowaniu — dlatego istnieje endpoint /api/diag.
+KATALOGI_CZASU_DZIALANIA = ("sim_kalkulator", "przyklady", "web")
 
 
 def zaladuj(nazwa):
@@ -89,17 +90,20 @@ class TestKonfiguracja:
     def test_vercel_json_jest_poprawnym_jsonem(self):
         assert isinstance(konfiguracja(), dict)
 
-    def test_interfejs_serwowany_statycznie(self):
-        # Strona nie zalezy od Pythona: gdy funkcja padnie, uzytkownik i tak
-        # zobaczy interfejs i komunikat bledu z API, zamiast pustego ekranu.
-        katalog = konfiguracja()["outputDirectory"]
-        assert (KORZEN / katalog / "index.html").exists()
+    def test_korzen_prowadzi_do_strony(self):
+        zrodla = {r["source"]: r["destination"] for r in konfiguracja()["rewrites"]}
+        assert zrodla.get("/") == "/api/index"
 
-    def test_include_files_pokrywa_wszystko_spoza_api(self):
-        # Builder Pythona nie dowozi automatycznie plikow spoza katalogu api/.
-        # Brak ktoregokolwiek z tych katalogow konczy sie ModuleNotFoundError
-        # albo brakiem parametrow w czasie dzialania funkcji.
-        assert set(wzorce_include()) >= {"sim_kalkulator", "przyklady", "web"}
+    def test_konfiguracja_nie_przestawia_katalogu_wyjsciowego(self):
+        # `outputDirectory` przesuwa katalog, w ktorym platforma szuka funkcji,
+        # przez co `api/` w korzeniu przestaje byc widoczne i build konczy sie
+        # bledem "pattern doesn't match any Serverless Functions".
+        assert "outputDirectory" not in konfiguracja()
+
+    def test_konfiguracja_nie_zawezaja_wzorca_funkcji(self):
+        # Wykrywanie zero-config samo znajduje api/*.py. Wlasny blok `functions`
+        # dokladal ryzyka bez zysku — zostaje domyslne wykrywanie.
+        assert "functions" not in konfiguracja()
 
     def test_vercelignore_nie_wyklucza_niczego_potrzebnego(self):
         wykluczone = {
@@ -107,7 +111,7 @@ class TestKonfiguracja:
             for w in (KORZEN / ".vercelignore").read_text(encoding="utf-8").splitlines()
             if w.strip() and not w.startswith("#")
         }
-        assert wykluczone.isdisjoint(set(wzorce_include()))
+        assert wykluczone.isdisjoint(set(KATALOGI_CZASU_DZIALANIA))
 
     def test_requirements_pokrywa_zaleznosci_spoza_biblioteki_standardowej(self):
         tresc = (KORZEN / "requirements.txt").read_text(encoding="utf-8").lower()
@@ -121,8 +125,10 @@ class TestKonfiguracja:
 
 
 class TestPaczkaFunkcji:
-    """Symulacja paczki Vercela: do katalogu trafia TYLKO to, co obejmuje
-    includeFiles, plus api/. Tak wlasnie wyglada srodowisko funkcji."""
+    """Symulacja paczki funkcji: katalog api/ plus katalogi czasu dzialania.
+
+    Sprawdza, ze funkcja startuje, gdy te pliki sa na miejscu — i ze bez nich
+    konczy sie czytelnym bledem, a nie cicha awaria."""
 
     @staticmethod
     @pytest.fixture(scope="class")
@@ -131,7 +137,7 @@ class TestPaczkaFunkcji:
 
         cel = tmp_path_factory.mktemp("paczka")
         shutil.copytree(KORZEN / "api", cel / "api")
-        for katalog in wzorce_include():
+        for katalog in KATALOGI_CZASU_DZIALANIA:
             zrodlo = KORZEN / katalog
             if zrodlo.is_dir():
                 shutil.copytree(
@@ -157,9 +163,9 @@ class TestPaczkaFunkcji:
         assert r.returncode == 0, r.stderr[-800:]
         assert r.stdout.strip() == "handler"
 
-    def test_paczka_bez_include_files_by_sie_wysypala(self, tmp_path):
-        # Dowod, ze includeFiles nie jest ozdoba — bez niego funkcja nie
-        # potrafi zaimportowac silnika. To byla przyczyna nieudanego wdrozenia.
+    def test_paczka_bez_pakietu_silnika_wysypuje_sie_czytelnie(self, tmp_path):
+        # Gdyby platforma nie dowiozla pakietu do paczki funkcji, blad jest
+        # jednoznaczny — i taki wlasnie raportuje /api/diag.
         import shutil
         import subprocess
         import sys as _sys
