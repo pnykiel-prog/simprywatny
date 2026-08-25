@@ -169,6 +169,14 @@ class TestBledy:
         assert kod == 400
         assert "stopa_referencyjna_ke" in dane["powod"]
 
+    def test_diag_dostepny_takze_lokalnie(self, adres):
+        # Endpoint diagnostyczny ma dzialac w obu srodowiskach, inaczej nie da
+        # sie porownac dzialajacego lokalnie z niedzialajacym wdrozeniem.
+        kod, dane = wolaj(adres, "/api/diag")
+        assert kod == 200
+        assert dane["ok"] is True
+        assert dane["silnik"]["przeliczenie"] == "ok"
+
     def test_nieznany_zasob_daje_404(self, adres):
         kod, dane = wolaj(adres, "/api/nie-ma")
         assert kod == 404 and dane["ok"] is False

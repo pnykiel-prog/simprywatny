@@ -88,12 +88,26 @@ Funkcje potrzebują trzech rzeczy spoza `api/`: pakietu `sim_kalkulator/`,
 pliku `web/index.html` i katalogu `przyklady/`. Gdyby któraś nie trafiła do
 paczki funkcji, `/api/diag` powie to wprost.
 
-### Gdy wdrożenie nie działa
+### Gdy wdrożenie nie działa — `/api/diag`
 
-Otwórz `/api/diag`. Endpoint mówi wprost, czego brakuje w paczce funkcji:
-wersję Pythona, katalog roboczy, obecność pakietu silnika, interfejsu
-i parametrów oraz wynik próbnego przeliczenia. Nie ujawnia zmiennych
-środowiskowych. `"ok": true` oznacza kompletną paczkę.
+Endpoint diagnostyczny mówi wprost, czego brakuje: wersję Pythona, katalog
+roboczy, obecność pakietu silnika, interfejsu i parametrów, wersje zależności
+oraz wynik próbnego przeliczenia. `"ok": true` znaczy, że środowisko jest
+kompletne. Nie ujawnia zmiennych środowiskowych ani zawartości plików.
+
+Działa w obu środowiskach, żeby dało się je porównać:
+
+| Gdzie | Adres |
+|---|---|
+| Wdrożenie | adres Twojej aplikacji + `/api/diag`, np. `https://nazwa-projektu.vercel.app/api/diag` |
+| Lokalnie | `http://127.0.0.1:8000/api/diag` po `python3 serwer.py` |
+
+Adres wdrożenia znajdziesz w panelu Vercela: projekt → zakładka **Deployments**
+→ przycisk **Visit** przy ostatnim udanym wdrożeniu. To ten sam adres, pod
+którym aplikacja nie działa — wystarczy dopisać `/api/diag`.
+
+Gdy build w ogóle się nie powiódł, nie ma czego otwierać: w panelu wejdź
+w nieudane wdrożenie i przeczytaj **Build Logs** — tam jest przyczyna.
 
 Każda funkcja to kilka linijek — cała mechanika siedzi w
 `sim_kalkulator/serverless.py`, a obliczenia w `sim_kalkulator/api.py`, z którego

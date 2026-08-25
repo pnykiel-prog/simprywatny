@@ -135,6 +135,13 @@ class Uchwyt(BaseHTTPRequestHandler):
         self._odpowiedz(200, sciezka.read_bytes(), typ)
 
     def _api_akcja(self, akcja: str, zmiany: Mapping[str, Any]) -> None:
+        if akcja == "diag":
+            # Ten sam raport co na wdrozeniu — zeby dalo sie porownac oba
+            # srodowiska, gdy jedno dziala, a drugie nie.
+            from sim_kalkulator.serverless import raport_diagnostyczny
+
+            raport = raport_diagnostyczny()
+            return self._json(raport, kod=200 if raport["ok"] else 500)
         kod, dane = _api.obsluz(akcja, self.stan.kopia(), zmiany)
         if kod == 200 and akcja == "arkusz":
             dane = self._zapisz_lokalnie(dane)
