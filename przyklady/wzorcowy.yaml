@@ -1,0 +1,88 @@
+# Przypadek wzorcowy — WARTOSCI PRZYKLADOWE, nie dane rzeczywistego projektu.
+# Sluzy do rozwoju silnika i jako punkt wyjscia dla wlasnych wariantow.
+# Przed uzyciem do wniosku podmien komplet parametrow zewnetrznych na aktualne.
+
+projekt:
+  nazwa: "Wariant wzorcowy — hybryda 30% komunalna"
+  gmina: "Przykladowo"
+  wojewodztwo: "wielkopolskie"
+
+powierzchnie:
+  pum_laczne: 3000.0            # m2
+  liczba_lokali: 55             # srednie PUM lokalu 54,5 m2 — w przedziale 25-80
+  liczba_kondygnacji: 4         # >= 3, wiec dzwigi obowiazkowe
+  udzial_puli_komunalnej: 0.30  # GLOWNE POKRETLO
+
+koszty:
+  koszt_budowy_na_m2: 7500.0
+  infrastruktura: 1200000.0
+  projekt_i_nadzor: 900000.0
+  koszty_ogolne: 600000.0
+  rezerwa: 700000.0
+  dzwigi: 350000.0
+  vat_odliczalny: true          # art. 13 ust. 3 — decyduje o VAT w podstawie grantu
+  stawka_vat: 0.08              # stosowana tylko gdy vat_odliczalny = false
+
+grunt:
+  wartosc: 2800000.0            # z operatu szacunkowego
+  forma: wlasnosc_inwestora     # wlasnosc_inwestora | aport_inwestora | aport_jst | nabycie | lokal_za_grunt
+  obciazony_hipoteka: false
+
+pula_spoleczna:
+  kredyt:
+    oprocentowanie: 0.025       # rp — preferencyjna stopa kredytu SBC
+    okres_lat: 30               # N, max 30 wliczajac karencje (art. 15b ust. 3)
+    karencja_lat: 3             # T
+    udzial_docelowy: 0.40       # max 0,80 (art. 15b ust. 2)
+  partycypacja:
+    stawka_procent_kosztu_lokalu: 0.20   # max 0,30 (art. 29a ust. 2)
+    rotacja_roczna: 0.07                 # do rezerwy na zwrot partycypacji
+  czynsz_zakladany_m2_mies: 22.00
+  czynsz_rynkowy_m2_mies: 34.00          # opcjonalny, do raportu rozjazdu
+  bonus_rewitalizacyjny: false           # przy aktywnym kredycie musi byc false (art. 13 ust. 4)
+
+pula_komunalna:
+  czynsz_placony_przez_gmine_m2_mies: 14.00
+  bonus_rewitalizacyjny: false
+  # kredyt i partycypacja sa tu niedopuszczalne — art. 5a ust. 3 ustawy z 8.12.2006
+
+eksploatacja:
+  koszt_eksploatacji_m2_rok: 30.00
+  odpis_remontowy_m2_rok: 12.00
+  ubezpieczenie_rocznie: 22000.0
+  koszty_stale_zarzadu_rocznie: 90000.0
+  pustostany_procent: 0.05
+  indeksacja_kosztow_rocznie: 0.035
+  indeksacja_czynszu_rocznie: 0.030
+
+parametry_zewnetrzne:
+  wartosc_odtworzeniowa_m2: 6500.0
+  stopa_bazowa_ke: 0.0442               # rb
+  stopa_referencyjna_ke: 0.0542         # r
+  stopa_dyskontowa: 0.0542              # rd
+  stopa_irs_bgk: 0.0480
+  waloryzacja_partycypacji_rocznie: 0.040   # wskaznik ceny 1 m2 GUS, art. 29a ust. 3
+  okres_amortyzacji_budynkow_lat: 100       # limituje okres powierzenia, § 11 rozp. 766
+  data_parametrow: 2026-08-01
+  zrodla:
+    wartosc_odtworzeniowa_m2: "WARTOSC PRZYKLADOWA — podmien na obwieszczenie wojewody, dz. urz. woj."
+    stopa_bazowa_ke: "WARTOSC PRZYKLADOWA — podmien na komunikat KE o stopach bazowych"
+    stopa_referencyjna_ke: "WARTOSC PRZYKLADOWA — podmien na komunikat KE o stopach referencyjnych"
+    stopa_dyskontowa: "WARTOSC PRZYKLADOWA — podmien na komunikat KE o stopach dyskontowych"
+    stopa_irs_bgk: "WARTOSC PRZYKLADOWA — podmien na ogloszenie BGK w BIP dla edycji naboru"
+    waloryzacja_partycypacji_rocznie: "WARTOSC PRZYKLADOWA — podmien na wskaznik ceny 1 m2 GUS"
+    okres_amortyzacji_budynkow_lat: "WARTOSC PRZYKLADOWA — przyjac okres amortyzacji z polityki rachunkowosci inwestora"
+
+rekompensata:
+  wsparcie_rfrm: 0.0                    # § 7 ust. 7 rozp. 1897 — wlicza sie do rekompensaty
+  wartosc_dokumentacji_bgk: 0.0         # nieodplatne prawo do dokumentacji projektowej BGK
+
+inwestor:
+  dostepny_wklad_wlasny: 6000000.0
+
+przelaczniki:
+  # Kwestie otwarte rozdz. 10 — wartosci domyslne sa ZALOZENIAMI, nie rozstrzygnieciami.
+  hybryda_jako_jedno_przedsiewziecie: false
+  grunt_jst_liczy_sie_do_limitu_grantu: true
+  metoda_rozsadnego_zysku: kapital_zaangazowany
+  remont_i_przebudowa: false

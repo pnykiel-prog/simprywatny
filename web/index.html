@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kalkulator montażu finansowego — prywatny SIM</title>
+<style>
+:root{
+  --tlo:#f7f7f5; --karta:#ffffff; --tekst:#1a1a18; --przygaszony:#6b6b66;
+  --linia:#dedcd6; --akcent:#1f4e79; --zle:#a51c1c; --dobrze:#1d6b32;
+  --uwaga:#8a5a00; --zolte:#fff6d9;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--tlo);color:var(--tekst);
+  font:15px/1.5 "Segoe UI",-apple-system,BlinkMacSystemFont,Roboto,Arial,sans-serif}
+header{background:var(--akcent);color:#fff;padding:14px 24px}
+header h1{margin:0;font-size:17px;font-weight:600}
+header p{margin:3px 0 0;font-size:12.5px;opacity:.85}
+main{max-width:1240px;margin:0 auto;padding:20px 24px 64px}
+.karta{background:var(--karta);border:1px solid var(--linia);border-radius:6px;
+  padding:16px 18px;margin-bottom:16px}
+.karta h2{margin:0 0 12px;font-size:14px;text-transform:uppercase;letter-spacing:.06em;
+  color:var(--przygaszony);font-weight:700}
+.siatka{display:grid;gap:16px}
+@media(min-width:900px){.siatka-3{grid-template-columns:repeat(3,1fr)}
+  .siatka-2{grid-template-columns:3fr 2fr}}
+
+/* --- pokretlo --- */
+.pokretlo{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:10px}
+.pokretlo .wartosc{font-size:40px;font-weight:700;color:var(--akcent);
+  font-variant-numeric:tabular-nums;min-width:110px}
+.pokretlo label{font-size:13px;color:var(--przygaszony)}
+input[type=range]{width:100%;height:26px;accent-color:var(--akcent)}
+.skala{display:flex;justify-content:space-between;font-size:11px;color:var(--przygaszony);
+  margin-top:-4px}
+
+/* --- werdykty --- */
+.werdykt{border:1px solid var(--linia);border-left-width:5px;border-radius:5px;
+  padding:12px 14px;background:#fff}
+.werdykt.tak{border-left-color:var(--dobrze)}
+.werdykt.nie{border-left-color:var(--zle)}
+.werdykt.nieznany{border-left-color:var(--linia);opacity:.55}
+.werdykt h3{margin:0 0 2px;font-size:13px;color:var(--przygaszony);font-weight:600}
+.werdykt .status{font-size:19px;font-weight:700;margin-bottom:6px}
+.werdykt.tak .status{color:var(--dobrze)}
+.werdykt.nie .status{color:var(--zle)}
+.werdykt .ograniczenie{font-size:12.5px;color:var(--tekst);margin-bottom:6px}
+.werdykt .luka{font-size:14px;font-weight:700;color:var(--zle);
+  font-variant-numeric:tabular-nums}
+.werdykt .luka span{font-weight:400;font-size:12px;color:var(--przygaszony)}
+.zbiorczy{padding:14px 18px;border-radius:6px;margin-bottom:16px;font-weight:600}
+.zbiorczy.tak{background:#e8f4ea;border:1px solid var(--dobrze);color:var(--dobrze)}
+.zbiorczy.nie{background:#fbeaea;border:1px solid var(--zle);color:var(--zle)}
+.zbiorczy .wiazace{display:block;font-weight:400;color:var(--tekst);
+  font-size:13px;margin-top:5px}
+
+/* --- tabele --- */
+table{border-collapse:collapse;width:100%;font-size:12.5px;
+  font-variant-numeric:tabular-nums}
+th,td{text-align:right;padding:4px 7px;border-bottom:1px solid var(--linia)}
+th:first-child,td:first-child{text-align:left}
+thead th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;
+  color:var(--przygaszony);border-bottom:2px solid var(--linia)}
+tbody tr.granica td{background:var(--zolte);font-weight:600}
+td.tak{color:var(--dobrze)} td.nie{color:var(--zle)} td.brak{color:var(--przygaszony)}
+.przewijane{max-height:340px;overflow:auto}
+
+/* --- wykres --- */
+.wykres{position:relative;height:120px;border-bottom:1px solid var(--linia);
+  display:flex;align-items:flex-end;gap:1px;margin-top:8px}
+.slupek{flex:1;border-radius:2px 2px 0 0;position:relative;cursor:default}
+.slupek.d3{background:var(--dobrze)}
+.slupek.d2{background:#8fb98f}
+.slupek.d1{background:#e0a95c}
+.slupek.d0{background:var(--zle)}
+.slupek.brak{background:#cfcfcb}
+.slupek.tu{outline:2px solid var(--akcent);outline-offset:1px;z-index:2}
+.wykres-osie{display:flex;justify-content:space-between;font-size:11px;
+  color:var(--przygaszony);margin-top:3px}
+
+/* --- parametry --- */
+details.parametry summary{cursor:pointer;font-weight:600;font-size:13px;
+  color:var(--akcent);padding:4px 0}
+.pola{display:grid;gap:10px 16px}
+@media(min-width:800px){.pola{grid-template-columns:repeat(2,1fr)}}
+.pole{display:flex;flex-direction:column;gap:2px}
+.pole label{font-size:11.5px;color:var(--przygaszony)}
+.pole input{padding:5px 7px;border:1px solid var(--linia);border-radius:4px;
+  font:inherit;font-size:13px;font-variant-numeric:tabular-nums}
+.pole input.zly{border-color:var(--zle);background:#fdf0f0}
+.pole .podstawa{font-size:10.5px;color:var(--przygaszony)}
+fieldset{border:1px solid var(--linia);border-radius:5px;margin:0 0 14px;padding:12px 14px}
+legend{font-size:11px;text-transform:uppercase;letter-spacing:.05em;
+  color:var(--przygaszony);font-weight:700;padding:0 5px}
+
+button{background:var(--akcent);color:#fff;border:0;border-radius:4px;
+  padding:9px 16px;font:inherit;font-weight:600;cursor:pointer}
+button:disabled{opacity:.5;cursor:progress}
+button.wtorny{background:#fff;color:var(--akcent);border:1px solid var(--akcent)}
+
+.blad{background:#fbeaea;border:1px solid var(--zle);color:var(--zle);
+  padding:12px 14px;border-radius:5px;margin-bottom:16px;font-size:13px;white-space:pre-wrap}
+.ostrzezenie{background:var(--zolte);border-left:4px solid var(--uwaga);
+  padding:8px 12px;margin-bottom:7px;font-size:12.5px;border-radius:0 4px 4px 0}
+.ostrzezenie .kod{font-weight:700;color:var(--uwaga);font-size:11px;
+  letter-spacing:.03em;display:block}
+.ostrzezenie .podstawa{color:var(--przygaszony);font-size:11px;display:block;margin-top:3px}
+.zastrzezenia{background:#fdfcf7;border:1px solid var(--linia);border-radius:6px;
+  padding:14px 18px;font-size:12px;color:var(--przygaszony)}
+.zastrzezenia li{margin-bottom:6px}
+.komunikat{background:#e8f4ea;border:1px solid var(--dobrze);color:var(--dobrze);
+  padding:10px 14px;border-radius:5px;margin-top:10px;font-size:12.5px}
+.pasek{font-size:12px;color:var(--przygaszony);margin-bottom:12px}
+.na-m2{display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:10px}
+.na-m2 div{background:#fafaf8;border:1px solid var(--linia);border-radius:4px;padding:8px 10px}
+.na-m2 b{display:block;font-size:16px;font-variant-numeric:tabular-nums}
+.na-m2 span{font-size:11px;color:var(--przygaszony)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Kalkulator montażu finansowego — prywatny SIM z umową z gminą</h1>
+  <p>Nie zastępuje wyliczenia BGK. Rekompensatę ustala wiążąco Bank.</p>
+</header>
+
+<main>
+  <div id="blad" class="blad" hidden></div>
+  <div class="pasek" id="pasek">Wczytywanie…</div>
+
+  <div class="karta">
+    <h2>Udział puli komunalnej</h2>
+    <div class="pokretlo">
+      <div class="wartosc" id="udzial-wartosc">—</div>
+      <label>Główne pokrętło. Gmina chce jak najwięcej lokali komunalnych; inwestor
+        potrzebuje puli społecznej, żeby uciągnąć dźwignię kredytową i wyższy czynsz.</label>
+    </div>
+    <input type="range" id="udzial" min="0" max="100" step="5" value="30">
+    <div class="skala"><span>0% — czysto społeczna</span><span>50%</span>
+      <span>100% — czysto komunalna</span></div>
+  </div>
+
+  <div id="zbiorczy" class="zbiorczy nie">—</div>
+  <div class="siatka siatka-3" id="werdykty"></div>
+
+  <div class="siatka siatka-2" style="margin-top:16px">
+    <div class="karta">
+      <h2>Punkt graniczny</h2>
+      <div id="sweep-podsumowanie" class="pasek">Liczenie sweepu…</div>
+      <div class="wykres" id="wykres"></div>
+      <div class="wykres-osie"><span>0%</span><span>50%</span><span>100%</span></div>
+      <div class="przewijane" style="margin-top:12px">
+        <table id="tabela-sweep">
+          <thead><tr><th>Udział</th><th>T1</th><th>T2</th><th>T3</th>
+            <th>Luka</th><th>Wiążące ograniczenie</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="karta">
+      <h2>Wskaźniki na m² PUM</h2>
+      <div class="na-m2" id="na-m2"></div>
+      <h2 style="margin-top:18px">Ranking parametrów</h2>
+      <table id="tabela-ranking">
+        <thead><tr><th>Parametr</th><th>Siła</th><th>Kierunek</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="karta">
+    <h2>Pule</h2>
+    <table id="tabela-pule">
+      <thead><tr><th>Pula</th><th>Ścieżka</th><th>PUM</th><th>Grant</th><th>Kredyt</th>
+        <th>Partycypacja</th><th>Wkład własny</th><th>Czynsz</th><th>Limit</th>
+        <th>Min. DSCR</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <p class="pasek" style="margin:8px 0 0" id="limity-zrodla"></p>
+  </div>
+
+  <div class="karta">
+    <h2>Rekompensata</h2>
+    <table id="tabela-rekompensata">
+      <thead><tr><th>Pula</th><th>Ścieżka</th><th>KN</th><th>RZ</th><th>RUOIG</th>
+        <th>Nadwyżka</th><th>Próg</th><th>Do zwrotu</th><th>Werdykt</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <p class="pasek" style="margin:8px 0 0;color:var(--zle)">
+      Wiążące jest wyliczenie Banku. To jest wskazanie, nie rozstrzygnięcie.</p>
+    <div id="grunt-ujecie" class="pasek" style="margin:4px 0 0"></div>
+  </div>
+
+  <div class="karta">
+    <h2>Ostrzeżenia i założenia silnika</h2>
+    <div id="ostrzezenia"></div>
+  </div>
+
+  <div class="karta">
+    <details class="parametry">
+      <summary>Parametry — edycja</summary>
+      <div id="parametry" style="margin-top:12px"></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px">
+        <button id="btn-zastosuj">Zastosuj i przelicz</button>
+        <button id="btn-arkusz" class="wtorny">Generuj arkusz i zapisz parametry</button>
+      </div>
+      <div id="komunikat" class="komunikat" hidden></div>
+    </details>
+  </div>
+
+  <div class="zastrzezenia">
+    <strong>Zastrzeżenia</strong>
+    <ul>
+      <li>Narzędzie wspiera odsiewanie wariantów przed złożeniem wniosku i rozmowę z gminą
+        o proporcji pul. Nie zastępuje wyliczenia BGK, opinii prawnej ani doradztwa podatkowego.</li>
+      <li>Stałe prawne odczytano z tekstów jednolitych obowiązujących w sierpniu 2026 r.
+        Przed każdym naborem sprawdź aktualność: parametry programów zmieniają się między
+        edycjami, a stopy zewnętrzne w ogóle nie są elementem prawa.</li>
+      <li>Kwestie otwarte z rozdz. 10 specyfikacji pozostają nierozstrzygnięte i mają wpływ
+        na wynik. Przełączniki w sekcji parametrów pokazują, które wartości są założeniami.</li>
+      <li>Narzędzie nie ocenia zdolności kredytowej inwestora ani nie prowadzi analizy
+        popytu — obłożenie jest parametrem wejściowym.</li>
+      <li>Cała arytmetyka wykonuje się po stronie silnika w Pythonie. Przeglądarka wyłącznie
+        formatuje wyniki.</li>
+    </ul>
+  </div>
+</main>
+
+<script>
+"use strict";
+// Przegladarka nie liczy niczego poza formatowaniem wyswietlania.
+// Kazda liczba na tej stronie pochodzi z /api — czyli z jedynego silnika.
+
+const $ = (s) => document.querySelector(s);
+const zmiany = {};          // sciezka -> wartosc, nakladane na parametry serwera
+let parametry = null;
+let sweepWTle = null;
+
+const zl = (x) => x == null ? "—" :
+  new Intl.NumberFormat("pl-PL", {maximumFractionDigits: 0}).format(x) + " zł";
+const zl2 = (x) => x == null ? "—" :
+  new Intl.NumberFormat("pl-PL", {minimumFractionDigits: 2, maximumFractionDigits: 2}).format(x);
+const proc = (x, m) => x == null ? "—" :
+  new Intl.NumberFormat("pl-PL", {style: "percent", maximumFractionDigits: m ?? 0}).format(x);
+const licz = (x, m) => x == null ? "—" :
+  new Intl.NumberFormat("pl-PL", {minimumFractionDigits: m ?? 3, maximumFractionDigits: m ?? 3}).format(x);
+
+function pokazBlad(tekst) {
+  const el = $("#blad");
+  el.textContent = tekst;
+  el.hidden = !tekst;
+}
+
+async function api(sciezka, ciało) {
+  const opcje = ciało
+    ? {method: "POST", headers: {"Content-Type": "application/json"},
+       body: JSON.stringify(ciało)}
+    : {method: "GET"};
+  const odp = await fetch(sciezka, opcje);
+  const dane = await odp.json();
+  if (!dane.ok) {
+    const etykieta = dane.typ === "walidacja" ? "Walidacja zatrzymała obliczenie"
+                   : dane.typ === "obliczenie" ? "Silnik przerwał obliczenie" : "Błąd";
+    throw new Error(etykieta + ":\n" + dane.powod);
+  }
+  return dane;
+}
+
+function biezaceZmiany() {
+  const kopia = Object.assign({}, zmiany);
+  kopia["powierzchnie.udzial_puli_komunalnej"] = Number($("#udzial").value) / 100;
+  return kopia;
+}
+
+// ---------------------------------------------------------------- werdykty
+function rysujWerdykty(w) {
+  $("#pasek").textContent =
+    `${w.projekt} — gmina ${w.gmina}. Koszty przedsięwzięcia ${zl(w.koszty_laczne)}.`;
+
+  const zb = $("#zbiorczy");
+  zb.className = "zbiorczy " + (w.domyka_sie ? "tak" : "nie");
+  zb.innerHTML = (w.domyka_sie
+      ? "Montaż domyka się — przechodzą wszystkie trzy testy."
+      : "Montaż się nie domyka.")
+    + `<span class="wiazace">Wiążące ograniczenie: ${w.wiazace_ograniczenie}</span>`;
+
+  // Powod jest widoczny od razu, nie za klinieciem. Werdykt zawsze z liczba.
+  $("#werdykty").innerHTML = w.werdykty.map((t) => `
+    <div class="werdykt ${t.przechodzi ? "tak" : "nie"}">
+      <h3>Test ${t.numer} — ${t.nazwa}</h3>
+      <div class="status">${t.status}</div>
+      <div class="ograniczenie">${t.wiazace_ograniczenie}</div>
+      ${t.przechodzi ? "" : `<div class="luka">${
+        t.luka_jednostka === "zł" || t.luka_jednostka === "zl"
+          ? zl(t.luka_kwota) : zl2(t.luka_kwota) + " " + t.luka_jednostka
+      } <span>— ${t.luka_opis}</span></div>`}
+    </div>`).join("");
+
+  const m = w.na_m2;
+  $("#na-m2").innerHTML = [
+    ["Koszt", m.koszt], ["Grant", m.grant], ["Kredyt", m.kredyt],
+    ["Partycypacja", m.partycypacja], ["Wkład własny", m.wklad_wlasny],
+    ["Luka kapitałowa", m.luka_kapitalowa],
+  ].map(([n, v]) => `<div><b>${zl2(v)}</b><span>${n} — zł/m² PUM</span></div>`).join("");
+
+  $("#tabela-pule").tBodies[0].innerHTML = w.pule.map((p) => `
+    <tr><td>${p.nazwa}</td><td>${p.sciezka}</td><td>${licz(p.pum, 0)} m²</td>
+    <td>${zl(p.grant)}</td><td>${zl(p.kredyt)}</td><td>${zl(p.partycypacja)}</td>
+    <td>${zl(p.wklad_wlasny)}</td><td>${zl2(p.czynsz)}</td>
+    <td>${zl2(p.limit_czynszu)}</td>
+    <td class="${p.min_dscr == null ? "brak" : (p.min_dscr >= 1 ? "tak" : "nie")}">
+      ${p.min_dscr == null ? "—" : licz(p.min_dscr)}</td></tr>`).join("");
+
+  $("#limity-zrodla").innerHTML = w.pule.map((p) =>
+    `<strong>${p.nazwa}:</strong> udział wsparcia ${proc(p.udzial_wsparcia, 1)} → stawka
+     ${proc(p.stawka_art_7c, 1)} rocznie od podstawy ${zl2(p.podstawa_m2)} zł/m²
+     (${p.podstawa_zrodlo}); wiąże ${p.limit_zrodlo}. Opłaty poza czynszem do
+     ${zl2(p.oplaty_poza_czynszem)} zł/m²/mies. — osobny strumień, nie doliczany do czynszu.`
+  ).join("<br>");
+
+  $("#tabela-rekompensata").tBodies[0].innerHTML = w.rekompensata.map((r) => `
+    <tr><td>${r.nazwa}</td><td>${r.sciezka}</td><td>${zl(r.kn)}</td><td>${zl(r.rz)}</td>
+    <td>${zl(r.ruoig)}</td><td>${zl(r.nadwyzka)}</td>
+    <td>${proc(r.prog_tolerancji)}</td><td>${zl(r.kwota_do_zwrotu)}</td>
+    <td class="${r.przechodzi ? "tak" : "nie"}">${r.przechodzi ? "przechodzi" : "nie przechodzi"}</td>
+    </tr>`).join("");
+  $("#grunt-ujecie").innerHTML = w.rekompensata.map((r) =>
+    `<strong>${r.nazwa}:</strong> ${r.grunt_ujecie}`).join("<br>");
+
+  $("#ostrzezenia").innerHTML = w.ostrzezenia.length
+    ? w.ostrzezenia.map((o) => `<div class="ostrzezenie"><span class="kod">${o.kod}</span>
+        ${o.tresc}<span class="podstawa">${o.podstawa}</span></div>`).join("")
+    : '<div class="pasek">Brak ostrzeżeń.</div>';
+}
+
+// ---------------------------------------------------------------- sweep
+function rysujSweep(s) {
+  $("#sweep-podsumowanie").textContent = s.podsumowanie;
+  const biezacy = Number($("#udzial").value) / 100;
+
+  $("#wykres").innerHTML = s.punkty.map((p) => {
+    const zdane = p.policzalny ? p.werdykty.filter(Boolean).length : -1;
+    const klasa = !p.policzalny ? "brak" : "d" + zdane;
+    const wys = !p.policzalny ? 12 : 28 + zdane * 30;
+    const tu = Math.abs(p.udzial - biezacy) < 1e-9 ? " tu" : "";
+    const tytul = p.policzalny
+      ? `${Math.round(p.udzial * 100)}% — ${zdane}/3 testów. ${p.wiazace_ograniczenie}`
+      : `${Math.round(p.udzial * 100)}% — niepoliczalny. ${p.powod}`;
+    return `<div class="slupek ${klasa}${tu}" style="height:${wys}px" title="${
+      tytul.replace(/"/g, "&quot;")}"></div>`;
+  }).join("");
+
+  $("#tabela-sweep").tBodies[0].innerHTML = s.punkty.map((p) => {
+    const kom = (i) => p.policzalny
+      ? `<td class="${p.werdykty[i] ? "tak" : "nie"}">${p.werdykty[i] ? "tak" : "nie"}</td>`
+      : '<td class="brak">—</td>';
+    const luka = p.luki.length
+      ? (p.luki[0].jednostka === "zł" || p.luki[0].jednostka === "zl"
+          ? zl(p.luki[0].kwota) : zl2(p.luki[0].kwota) + " " + p.luki[0].jednostka)
+      : "—";
+    const granica = s.punkt_graniczny != null
+      && Math.abs(p.udzial - s.punkt_graniczny) < 1e-9;
+    return `<tr class="${granica ? "granica" : ""}"><td>${proc(p.udzial)}</td>
+      ${kom(0)}${kom(1)}${kom(2)}<td>${luka}</td>
+      <td style="text-align:left;font-size:11.5px">${
+        (p.powod || p.wiazace_ograniczenie).slice(0, 130)}</td></tr>`;
+  }).join("");
+
+  $("#tabela-ranking").tBodies[0].innerHTML = s.ranking.map((r) => `
+    <tr><td>${r.nazwa}</td><td>${proc(r.sila_wplywu)}</td>
+    <td style="text-align:left;font-size:11.5px">${r.kierunek}</td></tr>`).join("");
+}
+
+// ---------------------------------------------------------------- parametry
+const SEKCJE = [
+  ["Powierzchnie", ["powierzchnie.pum_laczne", "powierzchnie.liczba_lokali",
+    "powierzchnie.liczba_kondygnacji"]],
+  ["Koszty", ["koszty.koszt_budowy_na_m2", "koszty.infrastruktura", "koszty.projekt_i_nadzor",
+    "koszty.koszty_ogolne", "koszty.rezerwa", "koszty.dzwigi", "koszty.stawka_vat"]],
+  ["Grunt", ["grunt.wartosc"]],
+  ["Pula społeczna", ["pula_spoleczna.kredyt.udzial_docelowy",
+    "pula_spoleczna.kredyt.oprocentowanie", "pula_spoleczna.kredyt.okres_lat",
+    "pula_spoleczna.kredyt.karencja_lat",
+    "pula_spoleczna.partycypacja.stawka_procent_kosztu_lokalu",
+    "pula_spoleczna.partycypacja.rotacja_roczna",
+    "pula_spoleczna.czynsz_zakladany_m2_mies", "pula_spoleczna.czynsz_rynkowy_m2_mies"]],
+  ["Pula komunalna", ["pula_komunalna.czynsz_placony_przez_gmine_m2_mies"]],
+  ["Eksploatacja", ["eksploatacja.koszt_eksploatacji_m2_rok",
+    "eksploatacja.odpis_remontowy_m2_rok", "eksploatacja.ubezpieczenie_rocznie",
+    "eksploatacja.koszty_stale_zarzadu_rocznie", "eksploatacja.pustostany_procent",
+    "eksploatacja.indeksacja_kosztow_rocznie", "eksploatacja.indeksacja_czynszu_rocznie"]],
+  ["Parametry zewnętrzne — sprawdź przed naborem",
+    ["parametry_zewnetrzne.wartosc_odtworzeniowa_m2", "parametry_zewnetrzne.stopa_bazowa_ke",
+     "parametry_zewnetrzne.stopa_referencyjna_ke", "parametry_zewnetrzne.stopa_dyskontowa",
+     "parametry_zewnetrzne.stopa_irs_bgk",
+     "parametry_zewnetrzne.waloryzacja_partycypacji_rocznie",
+     "parametry_zewnetrzne.okres_amortyzacji_budynkow_lat"]],
+  ["Inwestor", ["inwestor.dostepny_wklad_wlasny"]],
+];
+
+function wartoscZeSciezki(obiekt, sciezka) {
+  return sciezka.split(".").reduce((w, k) => (w == null ? null : w[k]), obiekt);
+}
+
+function rysujParametry() {
+  $("#parametry").innerHTML = SEKCJE.map(([tytul, pola]) => `
+    <fieldset><legend>${tytul}</legend><div class="pola">${pola.map((s) => {
+      const v = wartoscZeSciezki(parametry, s);
+      const etykieta = s.split(".").slice(1).join(" · ").replace(/_/g, " ");
+      return `<div class="pole"><label for="p-${s}">${etykieta}</label>
+        <input id="p-${s}" data-sciezka="${s}" type="number" step="any"
+          value="${v == null ? "" : v}"></div>`;
+    }).join("")}</div></fieldset>`).join("");
+
+  $("#parametry").querySelectorAll("input").forEach((el) => {
+    el.addEventListener("input", () => {
+      const s = el.dataset.sciezka;
+      if (el.value === "") { delete zmiany[s]; return; }
+      zmiany[s] = Number(el.value);
+    });
+  });
+}
+
+// ---------------------------------------------------------------- sterowanie
+let biegnie = false;
+async function przelicz() {
+  $("#udzial-wartosc").textContent = $("#udzial").value + "%";
+  if (biegnie) return;
+  biegnie = true;
+  try {
+    rysujWerdykty(await api("/api/przelicz", {zmiany: biezaceZmiany()}));
+    pokazBlad("");
+    if (sweepWTle) { rysujSweep(sweepWTle); }
+  } catch (e) {
+    pokazBlad(e.message);
+    $("#zbiorczy").className = "zbiorczy nie";
+    $("#zbiorczy").textContent = "Wariant niepoliczalny — patrz komunikat powyżej.";
+    $("#werdykty").innerHTML = [1, 2, 3].map((n) =>
+      `<div class="werdykt nieznany"><h3>Test ${n}</h3>
+       <div class="status">nie policzono</div></div>`).join("");
+  } finally {
+    biegnie = false;
+  }
+}
+
+async function odswiezSweep() {
+  try {
+    sweepWTle = await api("/api/sweep", {zmiany: Object.assign({}, zmiany)});
+    rysujSweep(sweepWTle);
+  } catch (e) {
+    $("#sweep-podsumowanie").textContent = "Sweepu nie policzono: " + e.message;
+  }
+}
+
+$("#udzial").addEventListener("input", przelicz);       // bez przeladowania strony
+$("#btn-zastosuj").addEventListener("click", async () => {
+  await przelicz();
+  await odswiezSweep();
+});
+$("#btn-arkusz").addEventListener("click", async (ev) => {
+  const btn = ev.currentTarget;
+  btn.disabled = true;
+  const kom = $("#komunikat");
+  kom.hidden = true;
+  try {
+    const odp = await api("/api/arkusz", {zmiany: biezaceZmiany()});
+    kom.textContent = odp.komunikat;
+    kom.hidden = false;
+    pokazBlad("");
+  } catch (e) {
+    pokazBlad(e.message);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+(async function start() {
+  try {
+    parametry = (await api("/api/parametry")).parametry;
+    const u = parametry.powierzchnie.udzial_puli_komunalnej;
+    $("#udzial").value = Math.round(u * 100 / 5) * 5;
+    rysujParametry();
+    await przelicz();
+    await odswiezSweep();
+  } catch (e) {
+    pokazBlad(e.message);
+  }
+})();
+</script>
+</body>
+</html>

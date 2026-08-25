@@ -1,0 +1,877 @@
+"""Dataclasses wejscia i wyjscia oraz walidacja danych wejsciowych.
+
+Modul nie zawiera zadnej liczby pochodzacej z ustawy — progi i limity pochodza
+wylacznie z `prawo.py`.
+
+Zasada: zadnych milczacych wartosci domyslnych dla parametrow zewnetrznych.
+Brak stopy referencyjnej ma zatrzymac obliczenie, nie podstawic ostatnia znana.
+"""
+
+from __future__ import annotations
+
+import datetime as _dt
+from dataclasses import dataclass, field, replace
+from decimal import Decimal, InvalidOperation
+from enum import Enum
+from pathlib import Path
+from typing import Any, Dict, List, Mapping, Optional, Sequence
+
+import yaml
+
+from . import prawo
+from .waluta import ZERO, zl
+
+
+class BladWalidacji(ValueError):
+    """Twardy blad danych wejsciowych. Obliczenie sie nie zaczyna."""
+
+
+class BladObliczenia(ValueError):
+    """Silnik nie moze zwrocic wiarygodnej liczby — przerywa zamiast zgadywac."""
+
+
+@dataclass(frozen=True)
+class Ostrzezenie:
+    """Sygnal, ktory nie zatrzymuje obliczenia, ale musi dotrzec do uzytkownika."""
+
+    kod: str
+    tresc: str
+    podstawa: str = ""
+
+    def __str__(self) -> str:
+        return f"[{self.kod}] {self.tresc}" + (f" ({self.podstawa})" if self.podstawa else "")
+
+
+class FormaGruntu(str, Enum):
+    WLASNOSC_INWESTORA = "wlasnosc_inwestora"
+    APORT_INWESTORA = "aport_inwestora"
+    APORT_JST = "aport_jst"
+    NABYCIE = "nabycie"
+    LOKAL_ZA_GRUNT = "lokal_za_grunt"
+
+    @property
+    def wniesiony_aportem(self) -> bool:
+        return self in (FormaGruntu.APORT_INWESTORA, FormaGruntu.APORT_JST)
+
+    @property
+    def pochodzi_od_jst(self) -> bool:
+        """Grunt wniesiony przez gmine — w sciezce grantowej jest PRZYCHODEM inwestora.
+
+        art. 5 ust. 9 pkt 4 ustawy z 8.12.2006. Patrz `rekompensata.py`.
+        """
+        return self in (FormaGruntu.APORT_JST, FormaGruntu.LOKAL_ZA_GRUNT)
+
+
+class UjecieKosztowInwestycyjnych(str, Enum):
+    """Jak koszt przedsiewziecia wchodzi do kosztow UOIG w rachunku kosztow netto.
+
+    Specyfikacja odsyla do katalogu z art. 5 ust. 7-8 ustawy z 8.12.2006, ale go
+    nie przytacza. Ujecie nakladu inwestycyjnego zmienia KN o rzad wielkosci,
+    wiec jest przelacznikiem z jawnym oznaczeniem zalozenia — patrz LUKI.md.
+    """
+
+    AMORTYZACJA = "amortyzacja"              # roczny odpis przez okres amortyzacji budynkow
+    # Naklad rozlozony rowno na lata okresu powierzenia — odczyt spojny z sama
+    # formula KN, ktora sumuje dokladnie po i = 1..n tego okresu.
+    AMORTYZACJA_W_OKRESIE_POWIERZENIA = "amortyzacja_w_okresie_powierzenia"
+    NAKLAD_POCZATKOWY = "naklad_poczatkowy"  # caly naklad w roku pierwszym
+    POMINIETE = "pominiete"                  # tylko koszty biezace
+
+
+class MetodaRozsadnegoZysku(str, Enum):
+    """Sposob wyliczenia rozsadnego zysku (RZ).
+
+    Specyfikacja podaje zrodlo stopy (IRS 20-letni na bazie WIBOR 3M, z BIP BGK),
+    ale nie podaje wzoru. Do czasu potwierdzenia w Banku metoda jest przelacznikiem
+    z jawnym oznaczeniem zalozenia — patrz LUKI.md.
+    """
+
+    KAPITAL_ZAANGAZOWANY = "kapital_zaangazowany"
+    KWOTA_WPROST = "kwota_wprost"
+
+
+# ---------------------------------------------------------------------------
+# Warstwa wspolna
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class Projekt:
+    nazwa: str
+    gmina: str
+    wojewodztwo: str
+
+
+@dataclass(frozen=True)
+class Powierzchnie:
+    pum_laczne: Decimal
+    liczba_lokali: int
+    liczba_kondygnacji: int
+    udzial_puli_komunalnej: Decimal   # 0.0-1.0 — GLOWNE POKRETLO
+
+    @property
+    def pum_komunalne(self) -> Decimal:
+        return self.pum_laczne * self.udzial_puli_komunalnej
+
+    @property
+    def pum_spoleczne(self) -> Decimal:
+        return self.pum_laczne - self.pum_komunalne
+
+    @property
+    def srednie_pum_lokalu(self) -> Decimal:
+        if self.liczba_lokali == 0:
+            return ZERO
+        return self.pum_laczne / Decimal(self.liczba_lokali)
+
+
+@dataclass(frozen=True)
+class Koszty:
+    koszt_budowy_na_m2: Decimal
+    infrastruktura: Decimal
+    projekt_i_nadzor: Decimal
+    koszty_ogolne: Decimal
+    rezerwa: Decimal
+    vat_odliczalny: bool           # art. 13 ust. 3 — wplywa na podstawe grantu
+    stawka_vat: Decimal            # potrzebna, gdy VAT nie jest odliczalny
+    dzwigi: Decimal = ZERO         # osobna pozycja — walidacja standardow technicznych
+
+
+@dataclass(frozen=True)
+class Grunt:
+    wartosc: Decimal               # z operatu
+    forma: FormaGruntu
+    obciazony_hipoteka: bool
+
+
+# ---------------------------------------------------------------------------
+# Pula spoleczna
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class Kredyt:
+    oprocentowanie: Decimal        # rp
+    okres_lat: int                 # N, laczny z karencja
+    karencja_lat: int              # T
+    udzial_docelowy: Decimal       # 0.0-0.80
+
+    @property
+    def aktywny(self) -> bool:
+        return self.udzial_docelowy > 0
+
+
+@dataclass(frozen=True)
+class Partycypacja:
+    stawka_procent_kosztu_lokalu: Decimal   # 0.0-0.30
+    rotacja_roczna: Decimal                 # do rezerwy na zwrot
+
+
+@dataclass(frozen=True)
+class PulaSpoleczna:
+    kredyt: Kredyt
+    partycypacja: Partycypacja
+    czynsz_zakladany_m2_mies: Decimal
+    bonus_rewitalizacyjny: bool             # tylko gdy brak kredytu, art. 13 ust. 4
+    czynsz_rynkowy_m2_mies: Optional[Decimal] = None
+
+
+# ---------------------------------------------------------------------------
+# Pula komunalna — kredyt i partycypacja niedopuszczalne (art. 5a ust. 3)
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class PulaKomunalna:
+    czynsz_placony_przez_gmine_m2_mies: Decimal
+    bonus_rewitalizacyjny: bool
+
+
+# ---------------------------------------------------------------------------
+# Eksploatacja i parametry zewnetrzne
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class Eksploatacja:
+    koszt_eksploatacji_m2_rok: Decimal
+    odpis_remontowy_m2_rok: Decimal
+    ubezpieczenie_rocznie: Decimal
+    koszty_stale_zarzadu_rocznie: Decimal
+    pustostany_procent: Decimal
+    indeksacja_kosztow_rocznie: Decimal
+    indeksacja_czynszu_rocznie: Decimal
+
+
+@dataclass(frozen=True)
+class ParametryZewnetrzne:
+    wartosc_odtworzeniowa_m2: Decimal        # obwieszczenie wojewody
+    stopa_bazowa_ke: Decimal                 # rb — dyskonto w KN
+    stopa_referencyjna_ke: Decimal           # r  — w EDB
+    stopa_dyskontowa: Decimal                # rd — w EDB
+    stopa_irs_bgk: Decimal                   # do rozsadnego zysku, z BIP BGK
+    waloryzacja_partycypacji_rocznie: Decimal  # wskaznik ceny 1 m2 GUS, art. 29a ust. 3
+    okres_amortyzacji_budynkow_lat: int      # limit okresu powierzenia, § 11 rozp. 766
+    data_parametrow: _dt.date
+    zrodla: Mapping[str, str] = field(default_factory=dict)
+
+    def wiek_miesiecy(self, na_dzien: Optional[_dt.date] = None) -> int:
+        na_dzien = na_dzien or _dt.date.today()
+        return (na_dzien.year - self.data_parametrow.year) * 12 + (
+            na_dzien.month - self.data_parametrow.month
+        )
+
+
+@dataclass(frozen=True)
+class Rekompensata:
+    """Skladniki wliczane do rekompensaty poza grantem — § 7 ust. 7 rozp. 1897."""
+
+    wsparcie_rfrm: Decimal                   # Rzadowy Fundusz Rozwoju Mieszkalnictwa
+    wartosc_dokumentacji_bgk: Decimal        # nieodplatne prawo do dokumentacji BGK
+    rozsadny_zysk_kwota: Optional[Decimal] = None   # tylko dla metody KWOTA_WPROST
+
+
+@dataclass(frozen=True)
+class Inwestor:
+    dostepny_wklad_wlasny: Decimal
+
+
+@dataclass(frozen=True)
+class Przelaczniki:
+    """Kwestie otwarte z rozdz. 10 specyfikacji — wartosc domyslna jest ZALOZENIEM."""
+
+    # 10.1. Czy hybryda to jedno przedsiewziecie, czy dwa. Domyslnie dwa odrebne.
+    hybryda_jako_jedno_przedsiewziecie: bool = False
+    # Grunt JST wniesiony aportem a limit gruntowy grantu z art. 13 ust. 1 pkt 1.
+    # Odczyt literalny: po aporcie grunt jest "we wladaniu inwestora". ZALOZENIE.
+    grunt_jst_liczy_sie_do_limitu_grantu: bool = True
+    # Brak wzoru na rozsadny zysk w specyfikacji — patrz LUKI.md.
+    metoda_rozsadnego_zysku: MetodaRozsadnegoZysku = MetodaRozsadnegoZysku.KAPITAL_ZAANGAZOWANY
+    # art. 5 ust. 1 pkt 2 u.f.w. — remont i przebudowa zamiast budowy (limit czynszu 5%).
+    remont_i_przebudowa: bool = False
+    # Ujecie nakladu inwestycyjnego w kosztach UOIG — patrz LUKI.md.
+    koszty_inwestycyjne_w_kn: UjecieKosztowInwestycyjnych = UjecieKosztowInwestycyjnych.AMORTYZACJA
+    # Czy zalozony wskaznik pustostanow obciaza takze pule komunalna. Domyslnie nie:
+    # najemca calej puli jest gmina, wiec ryzyko pustostanu zostaje po jej stronie.
+    # ZALOZENIE — zmienia wynik testu 2, wiec jest przelacznikiem, nie zaszyta reguła.
+    pustostany_takze_w_puli_komunalnej: bool = False
+
+
+@dataclass(frozen=True)
+class Wejscie:
+    projekt: Projekt
+    powierzchnie: Powierzchnie
+    koszty: Koszty
+    grunt: Grunt
+    pula_spoleczna: PulaSpoleczna
+    pula_komunalna: PulaKomunalna
+    eksploatacja: Eksploatacja
+    parametry_zewnetrzne: ParametryZewnetrzne
+    rekompensata: Rekompensata
+    inwestor: Inwestor
+    przelaczniki: Przelaczniki
+    ostrzezenia: Sequence[Ostrzezenie] = field(default_factory=tuple)
+
+    def z_udzialem_komunalnym(self, udzial: Decimal, na_dzien=None) -> "Wejscie":
+        """Kopia wejscia z innym ustawieniem glownego pokretla — do sweepu.
+
+        Walidacja idzie od nowa. Przesuniecie pokretla potrafi uczynic konfiguracje
+        bezprawna — na przyklad kredyt SBC przy 100% puli komunalnej (art. 5a ust. 3) —
+        a sweep nie moze takiego punktu policzyc po cichu.
+        """
+        kopia = replace(
+            self,
+            powierzchnie=replace(self.powierzchnie, udzial_puli_komunalnej=zl(udzial)),
+            ostrzezenia=(),
+        )
+        return replace(kopia, ostrzezenia=tuple(waliduj(kopia, na_dzien=na_dzien)))
+
+
+# ---------------------------------------------------------------------------
+# Parser YAML
+# ---------------------------------------------------------------------------
+
+def _sekcja(dane: Mapping[str, Any], nazwa: str) -> Mapping[str, Any]:
+    if nazwa not in dane or dane[nazwa] is None:
+        raise BladValidacjiBrak(nazwa)
+    wartosc = dane[nazwa]
+    if not isinstance(wartosc, Mapping):
+        raise BladWalidacji(f"Sekcja '{nazwa}' musi byc mapowaniem, jest {type(wartosc).__name__}.")
+    return wartosc
+
+
+def BladValidacjiBrak(sciezka: str) -> BladWalidacji:  # noqa: N802 — czytelnosc komunikatu
+    return BladWalidacji(
+        f"Brak wymaganej sekcji/parametru '{sciezka}' w pliku wejsciowym. "
+        "Silnik nie podstawia wartosci domyslnych — uzupelnij dane i powtorz."
+    )
+
+
+def _kwota(sekcja: Mapping[str, Any], klucz: str, sciezka: str) -> Decimal:
+    if klucz not in sekcja or sekcja[klucz] is None:
+        raise BladValidacjiBrak(f"{sciezka}.{klucz}")
+    try:
+        return zl(sekcja[klucz])
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise BladWalidacji(f"'{sciezka}.{klucz}' nie jest liczba: {sekcja[klucz]!r}") from exc
+
+
+def _calkowita(sekcja: Mapping[str, Any], klucz: str, sciezka: str) -> int:
+    if klucz not in sekcja or sekcja[klucz] is None:
+        raise BladValidacjiBrak(f"{sciezka}.{klucz}")
+    wartosc = sekcja[klucz]
+    if isinstance(wartosc, bool) or not isinstance(wartosc, int):
+        raise BladWalidacji(f"'{sciezka}.{klucz}' musi byc liczba calkowita, jest {wartosc!r}")
+    return wartosc
+
+
+def _flaga(sekcja: Mapping[str, Any], klucz: str, sciezka: str) -> bool:
+    if klucz not in sekcja or sekcja[klucz] is None:
+        raise BladValidacjiBrak(f"{sciezka}.{klucz}")
+    wartosc = sekcja[klucz]
+    if not isinstance(wartosc, bool):
+        raise BladWalidacji(f"'{sciezka}.{klucz}' musi byc true/false, jest {wartosc!r}")
+    return wartosc
+
+
+def _tekst(sekcja: Mapping[str, Any], klucz: str, sciezka: str) -> str:
+    if not sekcja.get(klucz):
+        raise BladValidacjiBrak(f"{sciezka}.{klucz}")
+    return str(sekcja[klucz])
+
+
+def _data(sekcja: Mapping[str, Any], klucz: str, sciezka: str) -> _dt.date:
+    if klucz not in sekcja or sekcja[klucz] is None:
+        raise BladValidacjiBrak(f"{sciezka}.{klucz}")
+    wartosc = sekcja[klucz]
+    if isinstance(wartosc, _dt.datetime):
+        return wartosc.date()
+    if isinstance(wartosc, _dt.date):
+        return wartosc
+    try:
+        return _dt.date.fromisoformat(str(wartosc))
+    except ValueError as exc:
+        raise BladWalidacji(f"'{sciezka}.{klucz}' nie jest data ISO: {wartosc!r}") from exc
+
+
+def wczytaj_yaml(sciezka: Path | str) -> Wejscie:
+    """Wczytuje plik YAML i zwraca zwalidowane wejscie."""
+    sciezka = Path(sciezka)
+    if not sciezka.exists():
+        raise BladWalidacji(f"Plik wejsciowy nie istnieje: {sciezka}")
+    with sciezka.open("r", encoding="utf-8") as plik:
+        dane = yaml.safe_load(plik)
+    if not isinstance(dane, Mapping):
+        raise BladWalidacji(f"Plik {sciezka} nie zawiera mapowania YAML.")
+    return zbuduj(dane)
+
+
+def zbuduj(dane: Mapping[str, Any], na_dzien: Optional[_dt.date] = None) -> Wejscie:
+    """Buduje `Wejscie` ze slownika i uruchamia komplet walidacji."""
+    surowy_projekt = _sekcja(dane, "projekt")
+    projekt = Projekt(
+        nazwa=_tekst(surowy_projekt, "nazwa", "projekt"),
+        gmina=_tekst(surowy_projekt, "gmina", "projekt"),
+        wojewodztwo=_tekst(surowy_projekt, "wojewodztwo", "projekt"),
+    )
+
+    sp = _sekcja(dane, "powierzchnie")
+    powierzchnie = Powierzchnie(
+        pum_laczne=_kwota(sp, "pum_laczne", "powierzchnie"),
+        liczba_lokali=_calkowita(sp, "liczba_lokali", "powierzchnie"),
+        liczba_kondygnacji=_calkowita(sp, "liczba_kondygnacji", "powierzchnie"),
+        udzial_puli_komunalnej=_kwota(sp, "udzial_puli_komunalnej", "powierzchnie"),
+    )
+
+    sk = _sekcja(dane, "koszty")
+    koszty = Koszty(
+        koszt_budowy_na_m2=_kwota(sk, "koszt_budowy_na_m2", "koszty"),
+        infrastruktura=_kwota(sk, "infrastruktura", "koszty"),
+        projekt_i_nadzor=_kwota(sk, "projekt_i_nadzor", "koszty"),
+        koszty_ogolne=_kwota(sk, "koszty_ogolne", "koszty"),
+        rezerwa=_kwota(sk, "rezerwa", "koszty"),
+        vat_odliczalny=_flaga(sk, "vat_odliczalny", "koszty"),
+        stawka_vat=_kwota(sk, "stawka_vat", "koszty"),
+        dzwigi=zl(sk.get("dzwigi", 0)),
+    )
+
+    sg = _sekcja(dane, "grunt")
+    forma_surowa = _tekst(sg, "forma", "grunt")
+    try:
+        forma = FormaGruntu(forma_surowa)
+    except ValueError as exc:
+        dozwolone = ", ".join(f.value for f in FormaGruntu)
+        raise BladWalidacji(
+            f"'grunt.forma' ma nieznana wartosc {forma_surowa!r}. Dozwolone: {dozwolone}."
+        ) from exc
+    grunt = Grunt(
+        wartosc=_kwota(sg, "wartosc", "grunt"),
+        forma=forma,
+        obciazony_hipoteka=_flaga(sg, "obciazony_hipoteka", "grunt"),
+    )
+
+    ss = _sekcja(dane, "pula_spoleczna")
+    sk_kredyt = _sekcja(ss, "kredyt")
+    kredyt = Kredyt(
+        oprocentowanie=_kwota(sk_kredyt, "oprocentowanie", "pula_spoleczna.kredyt"),
+        okres_lat=_calkowita(sk_kredyt, "okres_lat", "pula_spoleczna.kredyt"),
+        karencja_lat=_calkowita(sk_kredyt, "karencja_lat", "pula_spoleczna.kredyt"),
+        udzial_docelowy=_kwota(sk_kredyt, "udzial_docelowy", "pula_spoleczna.kredyt"),
+    )
+    sp_part = _sekcja(ss, "partycypacja")
+    partycypacja = Partycypacja(
+        stawka_procent_kosztu_lokalu=_kwota(
+            sp_part, "stawka_procent_kosztu_lokalu", "pula_spoleczna.partycypacja"
+        ),
+        rotacja_roczna=_kwota(sp_part, "rotacja_roczna", "pula_spoleczna.partycypacja"),
+    )
+    czynsz_rynkowy = ss.get("czynsz_rynkowy_m2_mies")
+    pula_spoleczna = PulaSpoleczna(
+        kredyt=kredyt,
+        partycypacja=partycypacja,
+        czynsz_zakladany_m2_mies=_kwota(ss, "czynsz_zakladany_m2_mies", "pula_spoleczna"),
+        bonus_rewitalizacyjny=_flaga(ss, "bonus_rewitalizacyjny", "pula_spoleczna"),
+        czynsz_rynkowy_m2_mies=zl(czynsz_rynkowy) if czynsz_rynkowy is not None else None,
+    )
+
+    sko = _sekcja(dane, "pula_komunalna")
+    # art. 5a ust. 3 u.f.w. — rozlacznosc konstrukcyjna. Sama obecnosc klucza to blad.
+    for zabroniony in ("kredyt", "partycypacja"):
+        if zabroniony in sko:
+            raise BladWalidacji(
+                f"'pula_komunalna.{zabroniony}' jest niedopuszczalna. "
+                "Przedsiewziecie z art. 5a ust. 1 ustawy z 8.12.2006 nie moze byc "
+                "finansowane kredytem SBC (art. 5a ust. 3), a najemca jest gmina, "
+                "wiec partycypacja nie wystepuje. To rozlacznosc konstrukcyjna, nie limit."
+            )
+    pula_komunalna = PulaKomunalna(
+        czynsz_placony_przez_gmine_m2_mies=_kwota(
+            sko, "czynsz_placony_przez_gmine_m2_mies", "pula_komunalna"
+        ),
+        bonus_rewitalizacyjny=_flaga(sko, "bonus_rewitalizacyjny", "pula_komunalna"),
+    )
+
+    se = _sekcja(dane, "eksploatacja")
+    eksploatacja = Eksploatacja(
+        koszt_eksploatacji_m2_rok=_kwota(se, "koszt_eksploatacji_m2_rok", "eksploatacja"),
+        odpis_remontowy_m2_rok=_kwota(se, "odpis_remontowy_m2_rok", "eksploatacja"),
+        ubezpieczenie_rocznie=_kwota(se, "ubezpieczenie_rocznie", "eksploatacja"),
+        koszty_stale_zarzadu_rocznie=_kwota(se, "koszty_stale_zarzadu_rocznie", "eksploatacja"),
+        pustostany_procent=_kwota(se, "pustostany_procent", "eksploatacja"),
+        indeksacja_kosztow_rocznie=_kwota(se, "indeksacja_kosztow_rocznie", "eksploatacja"),
+        indeksacja_czynszu_rocznie=_kwota(se, "indeksacja_czynszu_rocznie", "eksploatacja"),
+    )
+
+    sz = _sekcja(dane, "parametry_zewnetrzne")
+    parametry = ParametryZewnetrzne(
+        wartosc_odtworzeniowa_m2=_kwota(sz, "wartosc_odtworzeniowa_m2", "parametry_zewnetrzne"),
+        stopa_bazowa_ke=_kwota(sz, "stopa_bazowa_ke", "parametry_zewnetrzne"),
+        stopa_referencyjna_ke=_kwota(sz, "stopa_referencyjna_ke", "parametry_zewnetrzne"),
+        stopa_dyskontowa=_kwota(sz, "stopa_dyskontowa", "parametry_zewnetrzne"),
+        stopa_irs_bgk=_kwota(sz, "stopa_irs_bgk", "parametry_zewnetrzne"),
+        waloryzacja_partycypacji_rocznie=_kwota(
+            sz, "waloryzacja_partycypacji_rocznie", "parametry_zewnetrzne"
+        ),
+        okres_amortyzacji_budynkow_lat=_calkowita(
+            sz, "okres_amortyzacji_budynkow_lat", "parametry_zewnetrzne"
+        ),
+        data_parametrow=_data(sz, "data_parametrow", "parametry_zewnetrzne"),
+        zrodla=dict(sz.get("zrodla") or {}),
+    )
+
+    sr = _sekcja(dane, "rekompensata")
+    rzk = sr.get("rozsadny_zysk_kwota")
+    rekompensata = Rekompensata(
+        wsparcie_rfrm=_kwota(sr, "wsparcie_rfrm", "rekompensata"),
+        wartosc_dokumentacji_bgk=_kwota(sr, "wartosc_dokumentacji_bgk", "rekompensata"),
+        rozsadny_zysk_kwota=zl(rzk) if rzk is not None else None,
+    )
+
+    si = _sekcja(dane, "inwestor")
+    inwestor = Inwestor(
+        dostepny_wklad_wlasny=_kwota(si, "dostepny_wklad_wlasny", "inwestor")
+    )
+
+    spr = dane.get("przelaczniki") or {}
+    metoda_surowa = spr.get(
+        "metoda_rozsadnego_zysku", MetodaRozsadnegoZysku.KAPITAL_ZAANGAZOWANY.value
+    )
+    try:
+        metoda = MetodaRozsadnegoZysku(metoda_surowa)
+    except ValueError as exc:
+        dozwolone = ", ".join(m.value for m in MetodaRozsadnegoZysku)
+        raise BladWalidacji(
+            f"'przelaczniki.metoda_rozsadnego_zysku' ma nieznana wartosc {metoda_surowa!r}. "
+            f"Dozwolone: {dozwolone}."
+        ) from exc
+    ujecie_surowe = spr.get(
+        "koszty_inwestycyjne_w_kn", UjecieKosztowInwestycyjnych.AMORTYZACJA.value
+    )
+    try:
+        ujecie = UjecieKosztowInwestycyjnych(ujecie_surowe)
+    except ValueError as exc:
+        dozwolone = ", ".join(u.value for u in UjecieKosztowInwestycyjnych)
+        raise BladWalidacji(
+            f"'przelaczniki.koszty_inwestycyjne_w_kn' ma nieznana wartosc {ujecie_surowe!r}. "
+            f"Dozwolone: {dozwolone}."
+        ) from exc
+    przelaczniki = Przelaczniki(
+        hybryda_jako_jedno_przedsiewziecie=bool(
+            spr.get("hybryda_jako_jedno_przedsiewziecie", False)
+        ),
+        grunt_jst_liczy_sie_do_limitu_grantu=bool(
+            spr.get("grunt_jst_liczy_sie_do_limitu_grantu", True)
+        ),
+        metoda_rozsadnego_zysku=metoda,
+        koszty_inwestycyjne_w_kn=ujecie,
+        remont_i_przebudowa=bool(spr.get("remont_i_przebudowa", False)),
+        pustostany_takze_w_puli_komunalnej=bool(
+            spr.get("pustostany_takze_w_puli_komunalnej", False)
+        ),
+    )
+
+    wejscie = Wejscie(
+        projekt=projekt,
+        powierzchnie=powierzchnie,
+        koszty=koszty,
+        grunt=grunt,
+        pula_spoleczna=pula_spoleczna,
+        pula_komunalna=pula_komunalna,
+        eksploatacja=eksploatacja,
+        parametry_zewnetrzne=parametry,
+        rekompensata=rekompensata,
+        inwestor=inwestor,
+        przelaczniki=przelaczniki,
+    )
+    ostrzezenia = waliduj(wejscie, na_dzien=na_dzien)
+    return replace(wejscie, ostrzezenia=tuple(ostrzezenia))
+
+
+# ---------------------------------------------------------------------------
+# Walidacja
+# ---------------------------------------------------------------------------
+
+def waliduj(w: Wejscie, na_dzien: Optional[_dt.date] = None) -> List[Ostrzezenie]:
+    """Twarde bledy podnosza `BladWalidacji`. Reszta wraca jako lista ostrzezen."""
+    ostrzezenia: List[Ostrzezenie] = []
+
+    _waliduj_powierzchnie(w, ostrzezenia)
+    _waliduj_kredyt(w)
+    _waliduj_bonus(w)
+    _waliduj_partycypacje(w, ostrzezenia)
+    _waliduj_grunt(w)
+    _waliduj_eksploatacje(w)
+    _waliduj_parametry(w, ostrzezenia, na_dzien)
+    _waliduj_przelaczniki(w, ostrzezenia)
+
+    return ostrzezenia
+
+
+def _waliduj_powierzchnie(w: Wejscie, ostrzezenia: List[Ostrzezenie]) -> None:
+    p = w.powierzchnie
+    if p.pum_laczne <= 0:
+        raise BladWalidacji("'powierzchnie.pum_laczne' musi byc dodatnie.")
+    if p.liczba_lokali <= 0:
+        raise BladWalidacji("'powierzchnie.liczba_lokali' musi byc dodatnia.")
+    if p.liczba_kondygnacji <= 0:
+        raise BladWalidacji("'powierzchnie.liczba_kondygnacji' musi byc dodatnia.")
+    if not (ZERO <= p.udzial_puli_komunalnej <= 1):
+        raise BladWalidacji(
+            f"'powierzchnie.udzial_puli_komunalnej' musi miescic sie w przedziale 0.0-1.0, "
+            f"jest {p.udzial_puli_komunalnej}."
+        )
+
+    srednie = p.srednie_pum_lokalu
+    if srednie < prawo.PUM_LOKALU_MIN_M2 or srednie > prawo.PUM_LOKALU_MAX_M2:
+        ostrzezenia.append(
+            Ostrzezenie(
+                kod="PUM_POZA_PRZEDZIALEM",
+                tresc=(
+                    f"Srednie PUM lokalu wynosi {srednie:.1f} m2 i wykracza poza przedzial "
+                    f"{prawo.PUM_LOKALU_MIN_M2}-{prawo.PUM_LOKALU_MAX_M2} m2. Powyzej gornej "
+                    "granicy lokal dopuszczalny wylacznie dla rodzin wielodzietnych."
+                ),
+                podstawa="rozp. MIiR z 4.03.2019, Dz.U. 2019 poz. 457",
+            )
+        )
+    if p.liczba_kondygnacji >= prawo.DZWIG_OBOWIAZKOWY_OD_KONDYGNACJI and w.koszty.dzwigi <= 0:
+        ostrzezenia.append(
+            Ostrzezenie(
+                kod="BRAK_POZYCJI_DZWIGI",
+                tresc=(
+                    f"Budynek ma {p.liczba_kondygnacji} kondygnacji naziemnych, wiec dzwigi "
+                    "osobowe sa obowiazkowe, a w kosztach nie ma pozycji 'dzwigi'. "
+                    "Prawdopodobne niedoszacowanie kosztow przedsiewziecia."
+                ),
+                podstawa="rozp. MIiR z 4.03.2019, Dz.U. 2019 poz. 457",
+            )
+        )
+
+
+def _waliduj_kredyt(w: Wejscie) -> None:
+    k = w.pula_spoleczna.kredyt
+    if k.udzial_docelowy < 0:
+        raise BladWalidacji("'pula_spoleczna.kredyt.udzial_docelowy' nie moze byc ujemny.")
+    if k.udzial_docelowy > prawo.KREDYT_MAKSYMALNY_UDZIAL:
+        raise BladWalidacji(
+            f"Udzial kredytu {k.udzial_docelowy} przekracza maksimum "
+            f"{prawo.KREDYT_MAKSYMALNY_UDZIAL} kosztow przedsiewziecia "
+            "(art. 15b ust. 2 ustawy z 26.10.1995)."
+        )
+    if k.karencja_lat < 0:
+        raise BladWalidacji("'pula_spoleczna.kredyt.karencja_lat' nie moze byc ujemna.")
+    if k.oprocentowanie < 0:
+        raise BladWalidacji("'pula_spoleczna.kredyt.oprocentowanie' nie moze byc ujemne.")
+    if not k.aktywny:
+        return
+    if k.okres_lat <= 0:
+        raise BladWalidacji("Kredyt aktywny wymaga dodatniego 'okres_lat'.")
+    if k.okres_lat > prawo.KREDYT_MAKSYMALNY_OKRES_LAT:
+        raise BladWalidacji(
+            f"Okres kredytowania {k.okres_lat} lat przekracza maksimum "
+            f"{prawo.KREDYT_MAKSYMALNY_OKRES_LAT} lat wliczajac karencje "
+            "(art. 15b ust. 3 ustawy z 26.10.1995)."
+        )
+    if k.karencja_lat >= k.okres_lat:
+        raise BladWalidacji(
+            f"Karencja ({k.karencja_lat} lat) musi byc krotsza niz okres kredytowania "
+            f"({k.okres_lat} lat) — okres liczy sie lacznie z karencja."
+        )
+    # art. 5a ust. 3 — kredyt istnieje tylko wtedy, gdy istnieje pula spoleczna.
+    if w.powierzchnie.udzial_puli_komunalnej >= 1:
+        raise BladWalidacji(
+            "Kredyt SBC ustawiony przy udziale puli komunalnej rownym 100%. "
+            "Przedsiewziecie z art. 5a ust. 1 ustawy z 8.12.2006 nie moze byc finansowane "
+            "kredytem (art. 5a ust. 3) — wyzeruj 'udzial_docelowy' albo zmniejsz udzial puli."
+        )
+
+
+def _waliduj_bonus(w: Wejscie) -> None:
+    # art. 13 ust. 4 — bonus wylaczony wprost przy finansowaniu zwrotnym.
+    if w.pula_spoleczna.bonus_rewitalizacyjny and w.pula_spoleczna.kredyt.aktywny:
+        raise BladWalidacji(
+            "Bonus rewitalizacyjny / 'Za zyciem' (+5 pp) ustawiony w puli spolecznej razem "
+            "z aktywnym kredytem SBC. Art. 13 ust. 4 ustawy z 8.12.2006 wylacza bonus przy "
+            "finansowaniu zwrotnym — wybierz jedno."
+        )
+
+
+def _waliduj_partycypacje(w: Wejscie, ostrzezenia: List[Ostrzezenie]) -> None:
+    stawka = w.pula_spoleczna.partycypacja.stawka_procent_kosztu_lokalu
+    rotacja = w.pula_spoleczna.partycypacja.rotacja_roczna
+    if stawka < 0:
+        raise BladWalidacji("'partycypacja.stawka_procent_kosztu_lokalu' nie moze byc ujemna.")
+    if stawka > prawo.PARTYCYPACJA_MAKSIMUM:
+        raise BladWalidacji(
+            f"Partycypacja {stawka} przekracza maksimum {prawo.PARTYCYPACJA_MAKSIMUM} "
+            "kosztu budowy lokalu dla osoby fizycznej przy finansowaniu zwrotnym "
+            "(art. 29a ust. 2 ustawy z 26.10.1995)."
+        )
+    if not (ZERO <= rotacja <= 1):
+        raise BladWalidacji("'partycypacja.rotacja_roczna' musi miescic sie w przedziale 0.0-1.0.")
+    # Kwestia otwarta 10.2 — zbieg progow. Silnik zwraca ostrzezenie, nie werdykt.
+    if prawo.PARTYCYPACJA_PROG_UMOWA_BEZTERMINOWA <= stawka < prawo.PARTYCYPACJA_PROG_WYLACZENIA_ART_7B:
+        ostrzezenia.append(
+            Ostrzezenie(
+                kod="ZBIEG_PROGOW_PARTYCYPACJI",
+                tresc=(
+                    f"Partycypacja {stawka:.1%} miesci sie w przedziale "
+                    f"{prawo.PARTYCYPACJA_PROG_UMOWA_BEZTERMINOWA:.0%}-"
+                    f"{prawo.PARTYCYPACJA_PROG_WYLACZENIA_ART_7B:.0%}. Art. 29a ust. 2b nakazuje "
+                    "umowe na czas nieoznaczony albo najem instytucjonalny z dojsciem do wlasnosci, "
+                    "a art. 7b ust. 1 wciaz wymaga czasu oznaczonego min. 5 lat. Wnioski sa "
+                    "sprzeczne — silnik nie rozstrzyga typu umowy. Kwestia otwarta 10.2."
+                ),
+                podstawa="art. 29a ust. 2a i 2b, art. 7b ust. 1 ustawy z 26.10.1995",
+            )
+        )
+
+
+def _waliduj_grunt(w: Wejscie) -> None:
+    if w.grunt.wartosc < 0:
+        raise BladWalidacji("'grunt.wartosc' nie moze byc ujemna.")
+    if (
+        w.grunt.obciazony_hipoteka
+        and w.grunt.forma.wniesiony_aportem
+        and w.pula_spoleczna.kredyt.aktywny
+    ):
+        raise BladWalidacji(
+            "Grunt wniesiony aportem i obciazony hipoteka przy aktywnym kredycie SBC. "
+            "Obciazenie hipoteczne gruntu z aportu dyskwalifikuje przedsiewziecie "
+            "w sciezce finansowania zwrotnego."
+        )
+
+
+def _waliduj_eksploatacje(w: Wejscie) -> None:
+    e = w.eksploatacja
+    if not (ZERO <= e.pustostany_procent <= 1):
+        raise BladWalidacji(
+            f"'eksploatacja.pustostany_procent' musi miescic sie w przedziale 0.0-1.0, "
+            f"jest {e.pustostany_procent}. Wskaznik podaje sie jako ulamek (0,05 nie 5)."
+        )
+    for nazwa in (
+        "koszt_eksploatacji_m2_rok",
+        "odpis_remontowy_m2_rok",
+        "ubezpieczenie_rocznie",
+        "koszty_stale_zarzadu_rocznie",
+    ):
+        if getattr(e, nazwa) < 0:
+            raise BladWalidacji(f"'eksploatacja.{nazwa}' nie moze byc ujemny.")
+
+
+def _waliduj_parametry(
+    w: Wejscie, ostrzezenia: List[Ostrzezenie], na_dzien: Optional[_dt.date]
+) -> None:
+    p = w.parametry_zewnetrzne
+    if p.wartosc_odtworzeniowa_m2 <= 0:
+        raise BladWalidacji(
+            "'parametry_zewnetrzne.wartosc_odtworzeniowa_m2' musi byc dodatnia — "
+            "wartosc pochodzi z obwieszczenia wojewody."
+        )
+    if p.okres_amortyzacji_budynkow_lat <= 0:
+        raise BladWalidacji(
+            "'parametry_zewnetrzne.okres_amortyzacji_budynkow_lat' musi byc dodatni — "
+            "limituje okres powierzenia w sciezce kredytowej (§ 11 rozp. t.j. Dz.U. 2021 poz. 766)."
+        )
+    for nazwa in (
+        "stopa_bazowa_ke",
+        "stopa_referencyjna_ke",
+        "stopa_dyskontowa",
+        "stopa_irs_bgk",
+    ):
+        wartosc = getattr(p, nazwa)
+        if wartosc < 0:
+            raise BladWalidacji(f"'parametry_zewnetrzne.{nazwa}' nie moze byc ujemna.")
+        if wartosc > 1:
+            raise BladWalidacji(
+                f"'parametry_zewnetrzne.{nazwa}' = {wartosc} wyglada na wartosc procentowa. "
+                "Stopy podaje sie jako ulamki dziesietne (0,035 nie 3,5)."
+            )
+
+    wiek = p.wiek_miesiecy(na_dzien)
+    if wiek > prawo.PARAMETRY_MAKSYMALNY_WIEK_MIESIECY:
+        ostrzezenia.append(
+            Ostrzezenie(
+                kod="PARAMETRY_PRZETERMINOWANE",
+                tresc=(
+                    f"Parametry zewnetrzne pochodza z {p.data_parametrow.isoformat()}, "
+                    f"czyli sprzed {wiek} miesiecy. Prog to "
+                    f"{prawo.PARAMETRY_MAKSYMALNY_WIEK_MIESIECY} miesiecy. Stopy KE, IRS BGK "
+                    "i wartosc odtworzeniowa zmieniaja sie miedzy edycjami programu — "
+                    "przed naborem odswiez wszystkie."
+                ),
+                podstawa="wymog metodyczny, rozdz. 4.4 specyfikacji",
+            )
+        )
+    brakujace_zrodla = [
+        nazwa
+        for nazwa in (
+            "wartosc_odtworzeniowa_m2",
+            "stopa_bazowa_ke",
+            "stopa_referencyjna_ke",
+            "stopa_dyskontowa",
+            "stopa_irs_bgk",
+            "waloryzacja_partycypacji_rocznie",
+            "okres_amortyzacji_budynkow_lat",
+        )
+        if nazwa not in p.zrodla
+    ]
+    if brakujace_zrodla:
+        ostrzezenia.append(
+            Ostrzezenie(
+                kod="BRAK_ZRODLA_PARAMETRU",
+                tresc=(
+                    "Parametry zewnetrzne bez wskazanego zrodla: "
+                    + ", ".join(brakujace_zrodla)
+                    + ". Kazdy parametr zewnetrzny ma miec w YAML zrodlo i date, inaczej "
+                    "wyniku nie da sie odtworzyc."
+                ),
+                podstawa="wymog metodyczny, rozdz. 4.4 specyfikacji",
+            )
+        )
+
+
+def _waliduj_przelaczniki(w: Wejscie, ostrzezenia: List[Ostrzezenie]) -> None:
+    pz = w.przelaczniki
+    hybryda = ZERO < w.powierzchnie.udzial_puli_komunalnej < 1
+    if hybryda:
+        ostrzezenia.append(
+            Ostrzezenie(
+                kod="ZALOZENIE_HYBRYDA",
+                tresc=(
+                    "Wariant hybrydowy. Przyjeto, ze hybryda to "
+                    + (
+                        "JEDNO przedsiewziecie ze wspolnym limitem wsparcia"
+                        if pz.hybryda_jako_jedno_przedsiewziecie
+                        else "DWA odrebne przedsiewziecia — dwa wnioski, dwa okresy powierzenia, "
+                        "dwa testy rekompensaty"
+                    )
+                    + ". To ZALOZENIE, nie rozstrzygniecie — art. 13 ust. 1a czyta sie dwojako. "
+                    "Do potwierdzenia w BGK. Kwestia otwarta 10.1."
+                ),
+                podstawa="art. 13 ust. 1a w zw. z art. 5a ust. 1 i 3 ustawy z 8.12.2006",
+            )
+        )
+    if w.grunt.forma.pochodzi_od_jst:
+        ostrzezenia.append(
+            Ostrzezenie(
+                kod="ZALOZENIE_GRUNT_JST",
+                tresc=(
+                    "Grunt pochodzi od JST. Przyjeto, ze "
+                    + (
+                        "LICZY sie do limitu gruntowego grantu (odczyt literalny: po wniesieniu "
+                        "grunt jest we wladaniu inwestora)"
+                        if pz.grunt_jst_liczy_sie_do_limitu_grantu
+                        else "NIE liczy sie do limitu gruntowego grantu"
+                    )
+                    + ". To ZALOZENIE do potwierdzenia w BGK. Niezaleznie od niego w sciezce "
+                    "grantowej grunt JST jest PRZYCHODEM inwestora i obniza koszty netto."
+                ),
+                podstawa="art. 13 ust. 1 pkt 1 oraz art. 5 ust. 9 pkt 4 ustawy z 8.12.2006",
+            )
+        )
+    if pz.metoda_rozsadnego_zysku is MetodaRozsadnegoZysku.KWOTA_WPROST and (
+        w.rekompensata.rozsadny_zysk_kwota is None
+    ):
+        raise BladWalidacji(
+            "Metoda rozsadnego zysku 'kwota_wprost' wymaga podania "
+            "'rekompensata.rozsadny_zysk_kwota'. Silnik nie podstawia wartosci domyslnej."
+        )
+    if w.powierzchnie.udzial_puli_komunalnej > 0 and w.eksploatacja.pustostany_procent > 0:
+        ostrzezenia.append(
+            Ostrzezenie(
+                kod="ZALOZENIE_PUSTOSTANY_KOMUNALNE",
+                tresc=(
+                    "Wskaznik pustostanow "
+                    + (
+                        "obciaza takze pule komunalna"
+                        if pz.pustostany_takze_w_puli_komunalnej
+                        else "NIE obciaza puli komunalnej — przyjeto, ze najemca calej puli "
+                        "jest gmina i ryzyko pustostanu zostaje po jej stronie"
+                    )
+                    + ". ZALOZENIE modelowe: przesuwa przychod puli komunalnej, a wiec i wynik "
+                    "testu 2. Sprawdz, co mowi projekt umowy z gmina."
+                ),
+                podstawa="zalozenie modelowe, nie przepis",
+            )
+        )
+    ostrzezenia.append(
+        Ostrzezenie(
+            kod="ZALOZENIE_KOSZTY_INWESTYCYJNE_W_KN",
+            tresc=(
+                "Naklad inwestycyjny wchodzi do kosztow UOIG w ujeciu "
+                f"'{pz.koszty_inwestycyjne_w_kn.value}'. Specyfikacja odsyla do katalogu "
+                "z art. 5 ust. 7-8 ustawy z 8.12.2006, ale go nie przytacza, a wybor ujecia "
+                "zmienia koszty netto o rzad wielkosci — a wiec i wynik testu 3. "
+                "ZALOZENIE do potwierdzenia w BGK. Patrz LUKI.md."
+            ),
+            podstawa="art. 5 ust. 7-8 ustawy z 8.12.2006 — katalog nieprzytoczony w specyfikacji",
+        )
+    )
+    ostrzezenia.append(
+        Ostrzezenie(
+            kod="ZALOZENIE_ROZSADNY_ZYSK",
+            tresc=(
+                "Rozsadny zysk liczony metoda "
+                f"'{pz.metoda_rozsadnego_zysku.value}'. Specyfikacja wskazuje zrodlo stopy "
+                "(IRS 20-letni na bazie WIBOR 3M z BIP BGK), ale nie podaje wzoru — "
+                "przyjeta metoda jest ZALOZENIEM do potwierdzenia w Banku. Patrz LUKI.md."
+            ),
+            podstawa="§ 6 ust. 5 rozp. Dz.U. 2025 poz. 1897; § 12 ust. 10 rozp. Dz.U. 2021 poz. 766",
+        )
+    )

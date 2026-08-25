@@ -1,0 +1,182 @@
+# Luki w specyfikacji i przyjęte założenia
+
+Zasada nadrzędna projektu brzmi: **nie zgaduj liczb pochodzących z przepisów.**
+Ten plik jest listą miejsc, w których specyfikacja nie dała wartości albo
+rozstrzygnięcia, a implementacja i tak musiała się jakoś zachować.
+
+Każda pozycja jest zrealizowana jako **przełącznik z jawnym oznaczeniem
+założenia**, a nie jako zaszyta reguła. Silnik emituje dla nich ostrzeżenie,
+które trafia do UI, do arkusza i do wyniku API.
+
+Kolejność odpowiada temu, jak mocno pozycja przesuwa wynik.
+
+---
+
+## 1. Brak wzoru na rozsądny zysk (RZ) — **luka, nie kwestia otwarta**
+
+**Czego brakuje.** Rozdz. 3.5 specyfikacji wskazuje źródło stopy: IRS dla
+kontraktu 20-letniego na bazie WIBOR 3M, publikowany przez BGK w BIP przed
+naborem (§ 6 ust. 5 rozp. Dz.U. 2025 poz. 1897; § 12 ust. 10 rozp. Dz.U. 2021
+poz. 766). Nie podaje jednak **wzoru** — do czego tę stopę przyłożyć.
+
+**Co zrobiono.** Przełącznik `przelaczniki.metoda_rozsadnego_zysku`:
+
+| Wartość | Znaczenie |
+|---|---|
+| `kapital_zaangazowany` (domyślna) | RZ = zdyskontowany stopą bazową KE strumień `stopa_irs_bgk × wkład własny puli` przez okres powierzenia |
+| `kwota_wprost` | RZ podany wprost w `rekompensata.rozsadny_zysk_kwota`, dzielony kluczem PUM |
+
+**Dlaczego tak.** Wariant domyślny mierzy godziwy zwrot ze środków własnych
+faktycznie zaangażowanych w przedsięwzięcie i dyskontuje go tą samą stopą co
+strumień kosztów netto, żeby obie strony nierówności `RUOIG ≤ KN + RZ` były
+porównywalne. Wariant `kwota_wprost` istnieje po to, żeby po potwierdzeniu w
+BGK dało się wpisać liczbę z Banku bez zmiany kodu.
+
+**Do potwierdzenia w BGK.** Podstawa naliczenia (kapitał własny czy całość
+zaangażowanego kapitału), sposób dyskontowania, moment ustalenia stopy.
+
+---
+
+## 2. Katalog kosztów UOIG nie jest przytoczony
+
+**Czego brakuje.** Rozdz. 3.5 odsyła do art. 5 ust. 7–8 ustawy z 8.12.2006
+("Katalog kosztów UOIG") i art. 5 ust. 9 ("Katalog przychodów UOIG"), ale ich
+nie przytacza. Wyliczona jest wyłącznie pozycja gruntowa (asymetria) oraz
+wkład we wspólne koszty stałe w ścieżce kredytowej (§ 12 ust. 3 rozp. 766).
+
+**Co zrobiono.** Do kosztów bieżących UOIG weszły pozycje, które specyfikacja
+podaje wprost w danych wejściowych: eksploatacja, odpis remontowy,
+ubezpieczenie, koszty stałe zarządu, odsetki od kredytu. Do przychodów —
+czynsz netto po pustostanach. Grunt wchodzi wyłącznie własną regułą asymetrii.
+
+**Czego świadomie NIE ujęto.** Partycypacji ani rezerwy na jej zwrot. Jest to
+kapitał zwrotny, nie przychód i nie koszt świadczenia usługi; ujęcie jej po
+jednej stronie bez drugiej zniekształcałoby KN. **Do potwierdzenia w BGK.**
+
+---
+
+## 3. Ujęcie nakładu inwestycyjnego w kosztach netto — **przesuwa wynik o rząd wielkości**
+
+**Czego brakuje.** Skoro katalog z pkt 2 nie jest przytoczony, nie wiadomo, czy
+i jak nakład inwestycyjny wchodzi do KUOIG. To jest najsilniejsza dźwignia w
+całym teście 3.
+
+**Co zrobiono.** Przełącznik `przelaczniki.koszty_inwestycyjne_w_kn`:
+
+| Wartość | Znaczenie |
+|---|---|
+| `amortyzacja` (domyślna) | roczny odpis wg `okres_amortyzacji_budynkow_lat` |
+| `amortyzacja_w_okresie_powierzenia` | nakład rozłożony równo na lata okresu powierzenia |
+| `naklad_poczatkowy` | cały nakład w roku pierwszym |
+| `pominiete` | wyłącznie koszty bieżące |
+
+Podstawą jest zawsze koszt przedsięwzięcia **bez gruntu** — grunt ma własną
+regułę i ujęty dodatkowo w nakładzie trafiałby do KN dwa razy.
+
+**Skala wpływu.** Na przykładzie wzorcowym (3000 m² PUM, koszty 29,05 mln zł)
+różnica między `amortyzacja` przy 100-letnim okresie a `naklad_poczatkowy`
+decyduje o tym, czy test 3 przechodzi, czy kończy się wielomilionowym zwrotem
+do Funduszu Dopłat. Oba przykłady w `przyklady/` różnią się m.in. tym
+ustawieniem i dają przeciwne werdykty.
+
+**Do potwierdzenia w BGK — priorytet najwyższy.**
+
+---
+
+## 4. Hybryda: jedno przedsięwzięcie czy dwa (kwestia otwarta 10.1 specyfikacji)
+
+**Co zrobiono.** Przełącznik `przelaczniki.hybryda_jako_jedno_przedsiewziecie`,
+domyślnie `false` — dwa odrębne przedsięwzięcia, dwa wnioski, dwa okresy
+powierzenia, dwa testy rekompensaty o różnych progach tolerancji (20% w
+ścieżce kredytowej, 10% w grantowej). Przy `true` łączne wsparcie ściągane
+jest do 45% kosztów (art. 13 ust. 1a), a test nadwyżki liczony jest raz.
+
+Zgodnie ze wskazaniem specyfikacji, za odczytem domyślnym przemawia art. 5a
+ust. 3: kredyt SBC udzielany jest na przedsięwzięcie, nie na wydzieloną pulę
+lokali, więc wspólne przedsięwzięcie z kredytem byłoby wewnętrznie sprzeczne.
+
+---
+
+## 5. Grunt JST a limit gruntowy grantu
+
+**Czego brakuje.** Art. 13 ust. 1 pkt 1 mówi o gruncie „będącym we władaniu
+inwestora". Grunt wniesiony aportem przez gminę jest po wniesieniu we władaniu
+inwestora, ale nie pochodzi z jego majątku. Specyfikacja tego nie rozstrzyga —
+rozstrzyga jedynie ujęcie gruntu JST w **rekompensacie** (przychód).
+
+**Co zrobiono.** Przełącznik `przelaczniki.grunt_jst_liczy_sie_do_limitu_grantu`,
+domyślnie `true` (odczyt literalny). Niezależnie od jego ustawienia w ścieżce
+grantowej grunt JST pozostaje **przychodem** inwestora i obniża KN
+(art. 5 ust. 9 pkt 4) — te dwie reguły są rozłączne.
+
+---
+
+## 6. Bonus +5 pp a próg gruntowy
+
+**Czego brakuje.** Art. 13 ust. 4 dodaje 5 punktów procentowych, ale nie mówi,
+czy podnosi tylko limit górny (45% → 50%), czy oba progi konstrukcji z art. 13
+ust. 1 pkt 1 (35% → 40% i 45% → 50%).
+
+**Co zrobiono.** Przyjęto odczyt literalny: bonus podnosi wyłącznie limit
+górny, próg gruntowy zostaje na 35%. Silnik emituje ostrzeżenie
+`ZALOZENIE_BONUS_A_PROG_GRUNTOWY` **tylko wtedy, gdy przypadek faktycznie
+wystąpi** — czyli przy bonusie w puli społecznej bez kredytu. W puli komunalnej
+kwestia nie powstaje, bo art. 13 ust. 1 pkt 3 lit. c nie zawiera warunku
+gruntowego.
+
+---
+
+## 7. Pustostany w puli komunalnej
+
+**Czego brakuje.** Specyfikacja daje jeden wskaźnik `pustostany_procent` i nie
+mówi, czy obciąża on pulę, której najemcą jest gmina.
+
+**Co zrobiono.** Przełącznik `przelaczniki.pustostany_takze_w_puli_komunalnej`,
+domyślnie `false` — ryzyko pustostanu zostaje po stronie gminy. To założenie
+modelowe, nie przepis; sprawdź, co mówi projekt umowy z gminą.
+
+---
+
+## 8. Parametry zewnętrzne dodane ponad szkic YAML ze specyfikacji
+
+Trzy wartości są konieczne do policzenia tego, czego specyfikacja wymaga, a nie
+ma ich w szkicu z rozdz. 4. Silnik **nie podstawia dla nich wartości domyślnych** —
+ich brak zatrzymuje obliczenie:
+
+| Parametr | Do czego | Podstawa |
+|---|---|---|
+| `waloryzacja_partycypacji_rocznie` | rezerwa na zwrot partycypacji rośnie wskaźnikiem ceny 1 m² GUS | art. 29a ust. 3 ustawy z 26.10.1995 |
+| `okres_amortyzacji_budynkow_lat` | limituje okres powierzenia w ścieżce kredytowej; podstawa ujęcia `amortyzacja` | § 11 rozp. Dz.U. 2021 poz. 766 |
+| `koszty.stawka_vat` | podstawa grantu przy VAT nieodliczalnym | art. 13 ust. 3 ustawy z 8.12.2006 |
+
+Dodano też `rekompensata.wsparcie_rfrm` i `rekompensata.wartosc_dokumentacji_bgk`
+(§ 7 ust. 7 rozp. 1897) — muszą być podane jawnie, choćby zerem.
+
+---
+
+## 9. Uproszczenia, o których trzeba wiedzieć
+
+- **VAT** stosowany jest jedną stawką do wszystkich pozycji kosztowych, bo
+  wejście podaje jedną `stawka_vat`. Realne przedsięwzięcie ma różne stawki na
+  gruncie, robotach i usługach.
+- **Partycypacja** liczona jest od kosztu przedsięwzięcia przypadającego na
+  lokale puli społecznej (z udziałem w kosztach wspólnych), zgodnie z metodyką
+  „wszystko per m² PUM". Art. 29a ust. 2 mówi o „koszcie budowy lokalu" —
+  do potwierdzenia, czy chodzi o koszt pełny czy sam koszt budowy.
+- **Zakładka `Wrazliwosc`** w arkuszu jest migawką z silnika, nie żywymi
+  formułami. Każdy punkt sweepu to osobne przeliczenie całego modelu — nie da
+  się go złożyć z formuł jednej zakładki. Żywy model siedzi w zakładkach
+  `Alokacja`, `Pula_*`, `Rekompensata` i `Werdykty`; te przeliczają się w całości
+  po zmianie dowolnego założenia.
+- **Kwota do zwrotu** przy przekroczeniu progu tolerancji to cała nadwyżka, nie
+  tylko część ponad próg. Próg czytany jest jako granica dopuszczalności, nie
+  jako kwota wolna. **Do potwierdzenia w BGK.**
+
+---
+
+## 10. Kwestia otwarta 10.3 specyfikacji — poza zakresem silnika
+
+Wymóg umowy z gminą przy kredycie SBC dla prywatnego SIM (Informator BGK wiąże
+go z SIM, w których gminy mają ponad 50% głosów) nie jest parametrem
+obliczeniowym i nie został zaimplementowany. Jest to warunek dopuszczalności
+do sprawdzenia przed złożeniem wniosku, nie element montażu finansowego.
