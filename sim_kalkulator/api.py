@@ -207,6 +207,11 @@ def sweep_json(w) -> Dict[str, Any]:
                 "granica_gora": _liczba(r.maks_udzial_gora),
                 "sila_wplywu": _liczba(r.sila_wplywu),
                 "kierunek": r.kierunek_korzystny,
+                "dzwignia": r.opis_dzwigni,
+                "przelamuje": r.przelamuje,
+                "przelamanie_wartosc": _liczba(r.przelamanie_wartosc),
+                "przelamanie_zmiana": _liczba(r.przelamanie_zmiana),
+                "przelamanie_maks_udzial": _liczba(r.przelamanie_maks_udzial),
                 "zmienia_werdykt": r.zmienia_werdykt,
             }
             for r in analiza.ranking

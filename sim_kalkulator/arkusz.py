@@ -1703,7 +1703,7 @@ def _wrazliwosc(wb: Workbook, wynik: Wynik, analiza: Optional[Analiza]) -> None:
     wiersz += 1
     wiersz = _sekcja(ws, wiersz, "RANKING PARAMETROW — ktory najtaniej przesuwa punkt graniczny")
     naglowki = ["Parametr", "Bazowo", "-20%", "+20%", "Granica -20%", "Granica +20%",
-                "Sila wplywu / kierunek korzystny"]
+                "Sila wplywu / dzwignia"]
     for kol, tytul in enumerate(naglowki, start=1):
         komorka = ws.cell(row=wiersz, column=kol, value=tytul)
         komorka.font = Font(bold=True, size=9)
@@ -1720,7 +1720,7 @@ def _wrazliwosc(wb: Workbook, wynik: Wynik, analiza: Optional[Analiza]) -> None:
                               value=float(granica) if granica is not None else "brak")
             komorka.number_format = PROCENT if granica is not None else TEKST
         ws.cell(row=wiersz, column=7,
-                value=f"{float(r.sila_wplywu):.0%} — {r.kierunek_korzystny}")
+                value=f"{float(r.sila_wplywu):.0%} — {r.opis_dzwigni}")
         wiersz += 1
 
     wiersz += 1

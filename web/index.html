@@ -163,7 +163,7 @@ button.wtorny{background:#fff;color:var(--akcent);border:1px solid var(--akcent)
       <div class="na-m2" id="na-m2"></div>
       <h2 style="margin-top:18px">Ranking parametrów</h2>
       <table id="tabela-ranking">
-        <thead><tr><th>Parametr</th><th>Siła</th><th>Kierunek</th></tr></thead>
+        <thead><tr><th>Parametr</th><th>Siła</th><th>Dźwignia</th></tr></thead>
         <tbody></tbody>
       </table>
     </div>
@@ -404,9 +404,12 @@ function rysujSweep(s) {
         (p.powod || p.wiazace_ograniczenie).slice(0, 130)}</td></tr>`;
   }).join("");
 
+  // Gdy montaż domyka się bazowo, dźwignia mówi o ile przesuwa granicę.
+  // Gdy nie domyka się wcale — przy jakiej wartości zacząłby (rozdz. 7.1).
   $("#tabela-ranking").tBodies[0].innerHTML = s.ranking.map((r) => `
     <tr><td>${r.nazwa}</td><td>${proc(r.sila_wplywu)}</td>
-    <td style="text-align:left;font-size:11.5px">${r.kierunek}</td></tr>`).join("");
+    <td style="text-align:left;font-size:11.5px${r.przelamuje ? ";color:var(--dobrze)" : ""}">
+      ${r.dzwignia}</td></tr>`).join("");
 }
 
 // ---------------------------------------------------------------- parametry

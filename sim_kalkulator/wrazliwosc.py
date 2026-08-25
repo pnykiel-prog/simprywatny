@@ -161,6 +161,23 @@ PARAMETRY_WRAZLIWOSCI: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
 
 ODCHYLENIE = Decimal("0.20")
 
+# Zakres poszukiwania punktu przelamania — wartosci parametru, przy ktorej
+# montaz w ogole zaczyna sie domykac. Mnozniki badane od najblizszego wartosci
+# bazowej, zeby pierwszy trafiony byl zarazem najtanszy.
+PRZELAMANIE_ZASIEG = Decimal("0.60")
+PRZELAMANIE_KROK = Decimal("0.10")
+
+
+def _mnozniki_przelamania(zasieg: Decimal, krok: Decimal) -> List[Decimal]:
+    """Mnozniki od 1-zasieg do 1+zasieg, uporzadkowane wg odleglosci od 1."""
+    kandydaci: List[Decimal] = []
+    odchylenie = krok
+    while odchylenie <= zasieg + Decimal("1e-9"):
+        kandydaci.append(Decimal(1) - odchylenie)
+        kandydaci.append(Decimal(1) + odchylenie)
+        odchylenie += krok
+    return [m for m in kandydaci if m > 0]
+
 
 @dataclass(frozen=True)
 class WynikWrazliwosci:
@@ -176,6 +193,13 @@ class WynikWrazliwosci:
     maks_udzial_gora: Optional[Decimal]
     powod_dol: str = ""
     powod_gora: str = ""
+    # Punkt przelamania — wypelniany tylko wtedy, gdy wariant bazowy nie domyka
+    # sie przy zadnym udziale pul. Odpowiada na wymog rozdz. 7.1 specyfikacji:
+    # przy jakiej wartosci parametru montaz zaczalby przechodzic.
+    przelamanie_wartosc: Optional[Decimal] = None
+    przelamanie_zmiana: Optional[Decimal] = None      # wzglednie, np. -0.30
+    przelamanie_maks_udzial: Optional[Decimal] = None
+    przelamanie_zbadane: bool = False
 
     @property
     def przesuniecia(self) -> Tuple[Optional[Decimal], Optional[Decimal]]:
@@ -215,6 +239,33 @@ class WynikWrazliwosci:
         )
 
     @property
+    def przelamuje(self) -> bool:
+        """Czy parametr potrafi ruszyc montaz z martwego punktu."""
+        return self.przelamanie_wartosc is not None
+
+    @property
+    def opis_dzwigni(self) -> str:
+        """Jednozdaniowa odpowiedz: co ten parametr daje.
+
+        Rozroznia dwie sytuacje. Gdy wariant bazowy sie domyka — o ile parametr
+        przesuwa granice. Gdy nie domyka sie wcale — przy jakiej wartosci
+        zaczalby (rozdz. 7.1 specyfikacji).
+        """
+        if self.maks_udzial_bazowo is not None:
+            return self.kierunek_korzystny
+        if not self.przelamanie_zbadane:
+            return "nie badano"
+        if self.przelamanie_wartosc is None:
+            return (
+                f"nie przelamuje w zakresie +/-{PRZELAMANIE_ZASIEG:.0%} wartosci bazowej"
+            )
+        return (
+            f"montaz zaczyna sie domykac przy {self.przelamanie_zmiana:+.0%} "
+            f"(wartosc {self.przelamanie_wartosc:,.4f}".replace(",", " ")
+            + f"), do {self.przelamanie_maks_udzial:.0%} udzialu komunalnego"
+        )
+
+    @property
     def sila_wplywu(self) -> Decimal:
         """Miara do rankingu: najwieksze przesuniecie granicy w DOWOLNA strone.
 
@@ -225,9 +276,18 @@ class WynikWrazliwosci:
         realne = [abs(p) for p in self.przesuniecia if p is not None]
         if realne:
             return max(realne)
-        # Brak punktu bazowego: parametr, ktory w ogole otwiera jakies pole, ma wplyw.
+        # Brak punktu bazowego: miara staje sie "ile pola parametr w ogole otwiera".
         kandydaci = [u for u in (self.maks_udzial_dol, self.maks_udzial_gora) if u is not None]
-        return max(kandydaci, default=ZERO)
+        if kandydaci:
+            return max(kandydaci)
+        return self.przelamanie_maks_udzial or ZERO
+
+    @property
+    def koszt_przelamania(self) -> Decimal:
+        """Jak duzej zmiany parametru trzeba, zeby montaz ruszyl. Mniej znaczy taniej."""
+        if self.przelamanie_zmiana is None:
+            return Decimal("999")
+        return abs(self.przelamanie_zmiana)
 
 
 def wrazliwosc_jednoparametrowa(
@@ -265,6 +325,14 @@ def wrazliwosc_jednoparametrowa(
 
         w_dol, domyka_dol, maks_dol, powod_dol = warianty["dol"]
         w_gora, domyka_gora, maks_gora, powod_gora = warianty["gora"]
+
+        # Rozdz. 7.1: gdy montaz nie domyka sie przy zadnym udziale, sam ranking
+        # przesuniec nie niesie informacji — trzeba wskazac, przy jakiej wartosci
+        # parametru zaczalby przechodzic.
+        przelamanie = (None, None, None)
+        if bazowy_maks is None:
+            przelamanie = _szukaj_przelamania(w, podmien, bazowa, krok)
+
         wyniki.append(
             WynikWrazliwosci(
                 nazwa=nazwa,
@@ -279,15 +347,60 @@ def wrazliwosc_jednoparametrowa(
                 maks_udzial_gora=maks_gora,
                 powod_dol=powod_dol,
                 powod_gora=powod_gora,
+                przelamanie_wartosc=przelamanie[0],
+                przelamanie_zmiana=przelamanie[1],
+                przelamanie_maks_udzial=przelamanie[2],
+                przelamanie_zbadane=bazowy_maks is None,
             )
         )
     return tuple(wyniki)
 
 
+def _szukaj_przelamania(
+    w: Wejscie,
+    podmien: Callable[[Wejscie, Decimal], Wejscie],
+    bazowa: Decimal,
+    krok: Decimal,
+) -> Tuple[Optional[Decimal], Optional[Decimal], Optional[Decimal]]:
+    """Najblizsza wartosc parametru, przy ktorej montaz zaczyna sie domykac.
+
+    Zwraca (wartosc bezwzgledna, zmiana wzgledna, osiagalny udzial komunalny).
+    Mnozniki badane od najblizszego wartosci bazowej, wiec pierwszy trafiony
+    jest zarazem najtanszy. Wartosci odrzucone przez walidacje sa pomijane —
+    nie sa alternatywa, tylko konfiguracja bezprawna.
+    """
+    if bazowa == ZERO:
+        return (None, None, None)
+
+    for mnoznik in _mnozniki_przelamania(PRZELAMANIE_ZASIEG, PRZELAMANIE_KROK):
+        wartosc = bazowa * mnoznik
+        try:
+            sweep = sweep_udzialu(podmien(w, wartosc), krok)
+        except Exception:  # noqa: BLE001 — wartosc niedopuszczalna, probujemy dalej
+            continue
+        osiagalny = sweep.maksymalny_udzial_komunalny
+        if osiagalny is not None:
+            return (wartosc, mnoznik - Decimal(1), osiagalny)
+    return (None, None, None)
+
+
 def ranking(wyniki: Sequence[WynikWrazliwosci]) -> Tuple[WynikWrazliwosci, ...]:
-    """Parametry uporzadkowane wg sily wplywu — ktory najtaniej przesuwa granice."""
+    """Parametry uporzadkowane wg sily wplywu — ktory najtaniej rusza montaz.
+
+    Porzadek zalezy od sytuacji. Gdy wariant bazowy sie domyka, liczy sie to,
+    o ile parametr przesuwa punkt graniczny. Gdy nie domyka sie wcale, liczy sie
+    to, jak malej zmiany trzeba, zeby w ogole ruszyl — wtedy mniejszy koszt
+    przelamania jest lepszy.
+    """
+    if not wyniki:
+        return ()
+    bazowy_domyka = any(r.maks_udzial_bazowo is not None for r in wyniki)
+    if bazowy_domyka:
+        return tuple(
+            sorted(wyniki, key=lambda r: (r.sila_wplywu, r.zmienia_werdykt), reverse=True)
+        )
     return tuple(
-        sorted(wyniki, key=lambda r: (r.sila_wplywu, r.zmienia_werdykt), reverse=True)
+        sorted(wyniki, key=lambda r: (r.koszt_przelamania, -r.sila_wplywu))
     )
 
 

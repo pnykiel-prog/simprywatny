@@ -251,6 +251,26 @@ finansowania. To jest teza narzędzia: o werdykcie decyduje montaż, nie skala.
 
 ---
 
+## Ranking parametrów — dwa tryby
+
+Kolumna „Dźwignia" odpowiada na inne pytanie w zależności od tego, czy wariant
+bazowy w ogóle się domyka:
+
+| Sytuacja | Co pokazuje ranking |
+|---|---|
+| Montaż domyka się przy jakimś udziale | o ile parametr przesuwa punkt graniczny (`-20%` znaczy: obniż o jedną piątą, a granica pójdzie w górę) |
+| Nie domyka się przy żadnym udziale | przy jakiej wartości parametru **zacząłby** się domykać i do jakiego udziału komunalnego |
+
+Drugi tryb realizuje wymóg z rozdz. 7.1 specyfikacji. Silnik przeszukuje zakres
+±60% wartości bazowej, zaczynając od zmian najmniejszych — pierwsza znaleziona
+jest zarazem najtańsza. Ranking porządkuje wtedy parametry wg kosztu
+przełamania, nie wg siły przesunięcia.
+
+Gdy żaden parametr nie przełamuje w tym zakresie, wiersze mówią to wprost.
+Wtedy problemem nie jest pojedyncze założenie, tylko cała konstrukcja montażu.
+
+---
+
 ## Arkusz
 
 ```bash

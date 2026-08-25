@@ -179,3 +179,81 @@ class TestAnalizaZbiorcza:
         a = wrazliwosc.build(wczytaj_yaml(DOMYKAJACY), krok=D("0.25"))
         assert a.sweep.punkty
         assert len(a.ranking) == len(wrazliwosc.PARAMETRY_WRAZLIWOSCI)
+
+
+class TestPunktPrzelamania:
+    """Rozdz. 7.1 — gdy montaz nie domyka sie przy zadnym udziale, narzedzie ma
+    wskazac, przy jakiej wartosci parametru zaczalby przechodzic."""
+
+    @staticmethod
+    def wariant(koszt_budowy):
+        from sim_kalkulator.dane import zbuduj
+
+        dane = wspolne.zmien(koszty__koszt_budowy_na_m2=koszt_budowy)
+        dane["przelaczniki"]["koszty_inwestycyjne_w_kn"] = "naklad_poczatkowy"
+        dane["pula_spoleczna"]["kredyt"]["udzial_docelowy"] = 0.25
+        dane["pula_spoleczna"]["kredyt"]["karencja_lat"] = 0
+        dane["inwestor"]["dostepny_wklad_wlasny"] = 4600000.0
+        return wrazliwosc.build(zbuduj(dane, na_dzien=wspolne.DATA_ODNIESIENIA))
+
+    def test_wariant_ktory_sie_domyka_nie_szuka_przelamania(self):
+        a = self.wariant(7500.0)
+        assert a.sweep.maksymalny_udzial_komunalny is not None
+        for r in a.wrazliwosc:
+            assert r.przelamanie_zbadane is False
+            assert r.przelamuje is False
+
+    def test_wariant_bez_domkniecia_wskazuje_wartosc_przelamania(self):
+        a = self.wariant(10500.0)
+        assert a.sweep.maksymalny_udzial_komunalny is None
+        koszt = next(r for r in a.wrazliwosc if r.nazwa == "Koszt budowy na m2")
+        assert koszt.przelamanie_zbadane is True
+        assert koszt.przelamuje is True
+        assert koszt.przelamanie_wartosc is not None
+        assert koszt.przelamanie_maks_udzial is not None
+
+    def test_wskazana_wartosc_faktycznie_domyka_montaz(self):
+        # Kontrola wprost: podstawiamy wskazana wartosc i sprawdzamy, ze sweep
+        # rzeczywiscie znajduje punkt domkniecia.
+        from sim_kalkulator.dane import zbuduj
+
+        a = self.wariant(10500.0)
+        koszt = next(r for r in a.wrazliwosc if r.nazwa == "Koszt budowy na m2")
+        dane = wspolne.zmien(koszty__koszt_budowy_na_m2=float(koszt.przelamanie_wartosc))
+        dane["przelaczniki"]["koszty_inwestycyjne_w_kn"] = "naklad_poczatkowy"
+        dane["pula_spoleczna"]["kredyt"]["udzial_docelowy"] = 0.25
+        dane["pula_spoleczna"]["kredyt"]["karencja_lat"] = 0
+        dane["inwestor"]["dostepny_wklad_wlasny"] = 4600000.0
+        sweep = wrazliwosc.sweep_udzialu(zbuduj(dane, na_dzien=wspolne.DATA_ODNIESIENIA))
+        assert sweep.maksymalny_udzial_komunalny == koszt.przelamanie_maks_udzial
+
+    def test_szuka_najtanszej_zmiany(self):
+        # Mnozniki badane od najblizszego wartosci bazowej, wiec znaleziona
+        # zmiana jest najmniejsza z mozliwych w siatce.
+        a = self.wariant(10500.0)
+        koszt = next(r for r in a.wrazliwosc if r.nazwa == "Koszt budowy na m2")
+        assert abs(koszt.przelamanie_zmiana) <= wrazliwosc.PRZELAMANIE_ZASIEG
+
+    def test_ranking_stawia_najtansza_dzwignie_pierwsza(self):
+        a = self.wariant(10500.0)
+        przelamujace = [r for r in a.ranking if r.przelamuje]
+        assert przelamujace, "zaden parametr nie przelamuje — brak czego rankingowac"
+        koszty = [r.koszt_przelamania for r in przelamujace]
+        assert koszty == sorted(koszty)
+        assert a.ranking[0].przelamuje is True
+
+    def test_opis_dzwigni_zawsze_cos_mowi(self):
+        # Pusta komorka w rankingu jest bezuzyteczna — kazdy wiersz ma niesc tresc.
+        for koszt_budowy in (7500.0, 10500.0):
+            for r in self.wariant(koszt_budowy).ranking:
+                assert r.opis_dzwigni.strip()
+                assert r.opis_dzwigni != "nieokreslony"
+
+    def test_parametr_bez_przelamania_mowi_to_wprost(self):
+        from sim_kalkulator.dane import wczytaj_yaml
+
+        a = wrazliwosc.build(wczytaj_yaml(wspolne.WZORCOWY))
+        assert a.sweep.maksymalny_udzial_komunalny is None
+        for r in a.ranking:
+            assert "nie przelamuje" in r.opis_dzwigni
+            assert r.koszt_przelamania == D("999")
