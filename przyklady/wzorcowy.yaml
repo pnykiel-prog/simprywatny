@@ -55,13 +55,22 @@ pula_spoleczna:
     stawka_procent_kosztu_lokalu: 0.20   # max 0,30 (art. 29a ust. 2)
     rotacja_roczna: 0.07                 # do rezerwy na zwrot partycypacji
   czynsz_zakladany_m2_mies: 22.00
-  czynsz_rynkowy_m2_mies: 34.00          # opcjonalny, do raportu rozjazdu
   bonus_rewitalizacyjny: false           # przy aktywnym kredycie musi byc false (art. 13 ust. 4)
 
 pula_komunalna:
   czynsz_placony_przez_gmine_m2_mies: 14.00
   bonus_rewitalizacyjny: false
   # kredyt i partycypacja sa tu niedopuszczalne — art. 5a ust. 3 ustawy z 8.12.2006
+
+# Sufit faktyczny — poziom akceptowany przez rynek najmu w tej miejscowosci.
+# Silnik go NIE WYLICZA i nie zgaduje: bez tej danej narzedzie zadaje pytanie
+# zamiast podawac liczbe. Pole opcjonalne; gdy wypelnione, 'zrodlo' jest wymagane.
+# Najprosciej: przejrzyj kilkanascie aktualnych ofert mieszkan o podobnym metrazu
+# i wez mediane. Dotyczy wylacznie puli spolecznej — w komunalnej najemca jest gmina.
+rynek:
+  czynsz_rynkowy_m2_mies:   # np. 34.00 — zostaw puste, jesli nie znasz stawki
+  zrodlo:                   # np. "mediana z 15 ofert 40-55 m2, portal ogloszeniowy"
+  data:                     # np. 2026-08-10
 
 eksploatacja:
   koszt_eksploatacji_m2_rok: 30.00

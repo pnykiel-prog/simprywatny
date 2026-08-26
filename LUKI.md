@@ -276,3 +276,82 @@ przedsięwzięcie społeczne — grunt wniesiony do puli komunalnej domyka pulę
 komunalną i nie zwalnia zdolności kredytowej po stronie społecznej. Przy
 włączonym przełączniku `hybryda_jako_jedno_przedsiewziecie` to rozróżnienie
 traci sens i jest kandydatem do przeglądu.
+
+---
+
+## 12. Czynsz rynkowy — sufit, którego silnik nie policzy
+
+Errata nr 1 do specyfikacji interakcji. Poprzednia wersja narzędzia pokazywała
+na wykresie „stawkę rynkową 34,00 zł/m²" — liczbę wpisaną ręcznie w pliku
+przykładowym, bez źródła, bez daty i bez możliwości zmiany w interfejsie.
+Wyglądała jak dana. **Usunięta.**
+
+### 12.1. Dlaczego nie da się jej wyliczyć
+
+Narzędzie nie pyta o lokalizację w stopniu pozwalającym cokolwiek wywnioskować,
+a czynsze najmu różnią się między miejscowościami wielokrotnie. Każde
+oszacowanie byłoby zgadywaniem, a liczba bez źródła wchodzi do rozmowy z gminą
+jako argument. Stawka jest więc **parametrem wejściowym** — sekcja `rynek`,
+pole opcjonalne, `zrodlo` obowiązkowe gdy podano wartość.
+
+Przy pustym polu narzędzie **zadaje pytanie zamiast podawać liczbę**. To jest
+uczciwsze i bardziej użyteczne: zamienia brakującą daną w decyzję, którą
+użytkownik i tak musi podjąć — a on tę odpowiedź zna, tylko nie ma jej w arkuszu.
+
+### 12.2. Podłoga czynszowa liczona osobno dla każdej puli
+
+Model odpowiada na pytanie „czy podłoga mieści się pod najniższym z sufitów",
+a podłoga znaczy co innego w każdej puli, bo każda ma inne instrumenty:
+
+- **pula społeczna** — stawka, przy której kredyt uniesie całą lukę kapitałową
+  przedsięwzięcia, czyli przy której inwestor nie musi dokładać kapitału;
+- **pula komunalna** — stawka pokrywająca koszty bieżące. Zerowego wkładu
+  własnego nie da się w niej osiągnąć **żadną stawką**: kredyt jest wykluczony
+  (art. 5a ust. 3), więc nie ma czym zamienić przyszłego czynszu na kapitał
+  początkowy. 20% kosztów poza dotacją to luka strukturalna, którą pokrywa
+  kapitał — i tak jest to nazwane w podpisie wykresu.
+
+### 12.3. Hybryda — dwie niewiadome, jedno równanie
+
+Rozstrzygnięcie: **czynsz komunalny zadany, społeczny domyka.** Uzasadnienie jest
+praktyczne, nie matematyczne — stawkę komunalną negocjuje się z gminą i zapisuje
+w umowie, a limit przy dotacji 80% i tak przyciska ją do 2,5% wartości
+odtworzeniowej rocznie.
+
+Konsekwencja, którą trzeba przyjąć razem z tym rozstrzygnięciem: czynsz społeczny
+domyka **całe przedsięwzięcie**, nie samą pulę społeczną. Kredyt jest jedynym
+instrumentem zamieniającym przyszły czynsz na kapitał początkowy i przysługuje
+wyłącznie puli społecznej, więc ciężar obu pul spada na najemców społecznych.
+Stąd monotoniczny wzrost wymaganej stawki wraz z udziałem puli komunalnej.
+
+Skutek uboczny wart odnotowania: **stawka komunalna nie wpływa na wymagany czynsz
+społeczny.** Czynsz komunalny nie zamienia się w kapitał początkowy, więc luka,
+którą musi pokryć kredyt, od niego nie zależy. To wynika wprost z przyjętego
+rozstrzygnięcia, ale bywa zaskakujące.
+
+### 12.4. Rozbieżność w samej erracie
+
+Rozdz. 3.3 podaje jako jedną z dźwigni przy zbyt wysokim czynszu „większy udział
+mieszkań komunalnych". Rozdz. 5.2 tej samej erraty mówi coś przeciwnego i to on
+jest zgodny z modelem: wzrost udziału puli komunalnej **wypycha czynsz społeczny
+w górę**, bo pula komunalna wnosi mniej. Na przykładzie z repozytorium wymagana
+stawka rośnie z 21,31 zł przy zerowym udziale do 33,48 zł przy 60%.
+
+W komunikacie zaimplementowano wersję zgodną z rozdz. 5.2 i z liczbami —
+narzędzie podpowiada **mniejszy** udział mieszkań komunalnych.
+
+### 12.5. Brak stawki domykającej to ograniczenie kapitałowe, nie rynkowe
+
+Gdy potrzebny kredyt przebija ustawowe 80% kosztów, montażu nie domknie żadna
+stawka czynszu. Model **nie raportuje tego jako przebicia sufitu rynkowego** —
+to inne ograniczenie i inne dźwignie. Test rynkowy jest wtedy nierozstrzygnięty
+(`None`), a nie negatywny.
+
+### 12.6. Stawka akceptowana przez gminę — świadomie niewdrożona
+
+Errata rozdz. 6.4 przewiduje opcjonalny parametr
+`czynsz_akceptowany_przez_gmine_m2_mies` jako drugą linię przerywaną w wierszu
+komunalnym, z **priorytetem niskim** i wskazówką „wdrożyć po uruchomieniu
+mechanizmu dla puli społecznej — bez sygnału z negocjacji nie wiadomo, czy
+parametr jest w praktyce potrzebny". Zgodnie z tym nie został wdrożony.
+Konstrukcja jest identyczna jak dla stawki rynkowej, więc dołożenie będzie proste.

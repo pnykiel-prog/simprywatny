@@ -37,6 +37,14 @@ class PunktSweepu:
     luki: Tuple[Tuple[str, Decimal, str], ...]  # (opis, kwota, jednostka)
     # Wymagany wklad wlasny w tym punkcie — os pionowa wykresu negocjacyjnego.
     wklad_wymagany: Optional[Decimal] = None
+    # Czynsz spoleczny domykajacy montaz bez wkladu wlasnego przy tym udziale.
+    # Errata nr 1, rozdz. 5.2: wzrost udzialu puli komunalnej wypycha go w gore,
+    # bo pula komunalna wnosi mniej — nizszy limit czynszu, brak kredytu, brak
+    # partycypacji — a ciezar przenosi sie na kurczaca sie pule spoleczna.
+    czynsz_domykajacy: Optional[Decimal] = None
+    # Czy przy tym udziale wymagany czynsz spoleczny miesci sie pod stawka rynkowa.
+    # None, gdy stawki rynkowej nie podano — wtedy tego sufitu po prostu nie ma.
+    miesci_sie_w_rynku: Optional[bool] = None
     powod_niepoliczalnosci: str = ""
 
     @property
@@ -71,6 +79,38 @@ class Sweep:
             return None
         powyzej = [p.udzial for p in self.punkty if p.udzial > maks]
         return min(powyzej) if powyzej else None
+
+    @property
+    def punkt_graniczny_rynkowy(self) -> Optional[Decimal]:
+        """Pierwszy udzial, przy ktorym wymagany czynsz spoleczny przebija rynek.
+
+        Errata nr 1, rozdz. 5.2. Bywa wczesniejszy niz punkt kapitalowy i jest
+        calkowicie niewidoczny, jesli sledzi sie wylacznie limity ustawowe.
+        None, gdy stawki rynkowej nie podano albo gdy rynek udzwiga caly zakres —
+        drugiego punktu wtedy po prostu nie ma.
+        """
+        przebijajace = [
+            p.udzial
+            for p in self.punkty
+            if p.policzalny and p.miesci_sie_w_rynku is False
+        ]
+        return min(przebijajace) if przebijajace else None
+
+    @property
+    def punkt_graniczny_wiazacy(self) -> Optional[Decimal]:
+        """Wczesniejszy z dwoch punktow granicznych — ten, ktory faktycznie wiaze."""
+        punkty = [p for p in (self.punkt_graniczny, self.punkt_graniczny_rynkowy) if p is not None]
+        return min(punkty) if punkty else None
+
+    @property
+    def rodzaj_punktu_wiazacego(self) -> str:
+        """'rynkowy', 'kapitalowy' albo '' — czym konczy sie zakres."""
+        wiazacy = self.punkt_graniczny_wiazacy
+        if wiazacy is None:
+            return ""
+        if self.punkt_graniczny_rynkowy is not None and wiazacy == self.punkt_graniczny_rynkowy:
+            return "rynkowy"
+        return "kapitalowy"
 
     @property
     def test_blokujacy(self) -> Optional[int]:
@@ -114,6 +154,19 @@ def _punkt(w: Wejscie, udzial: Decimal) -> PunktSweepu:
             powod_niepoliczalnosci=wynik.powod,
         )
     werdykty = wynik.werdykty
+    # Test rynkowy — sufit faktyczny. Gdy stawki nie podano, punktu granicznego
+    # rynkowego po prostu nie ma; narzedzie go nie wymysla.
+    domykajacy = wynik.czynsz_domykajacy_m2_mies
+    rynkowy = w.rynek.czynsz_rynkowy_m2_mies
+    if rynkowy is None or domykajacy is None:
+        # Brak stawki rynkowej — sufitu nie ma, wiec nie ma czego testowac.
+        # Brak stawki domykajacej — montazu nie domyka ZADNA stawka, bo kredyt
+        # przebija ustawowy pulap. To ograniczenie kapitalowe, nie rynkowe;
+        # przypisanie go rynkowi falszowaloby odpowiedz na pytanie, ktory sufit
+        # wiaze, a od tego zalezy, czy da sie cokolwiek z tym zrobic.
+        miesci = None
+    else:
+        miesci = domykajacy <= rynkowy
     return PunktSweepu(
         udzial=udzial,
         policzalny=True,
@@ -126,6 +179,8 @@ def _punkt(w: Wejscie, udzial: Decimal) -> PunktSweepu:
             if not t.przechodzi
         ),
         wklad_wymagany=wynik.finansowanie.wklad_wlasny_wymagany,
+        czynsz_domykajacy=domykajacy,
+        miesci_sie_w_rynku=miesci,
     )
 
 

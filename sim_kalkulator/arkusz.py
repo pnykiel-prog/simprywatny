@@ -285,9 +285,6 @@ def _zalozenia(wb: Workbook, wynik: Wynik, rej: Rejestr) -> None:
             podstawa="art. 29a ust. 3 ustawy z 26.10.1995", format_liczby=PROCENT)
     wejscie("czynsz_spoleczny", "Czynsz zakladany", ps.czynsz_zakladany_m2_mies,
             "zl/m2/mies.", format_liczby=STAWKA, zolte=True)
-    wejscie("czynsz_rynkowy", "Czynsz rynkowy (opcjonalnie)",
-            ps.czynsz_rynkowy_m2_mies if ps.czynsz_rynkowy_m2_mies is not None else "",
-            "zl/m2/mies.", zrodlo="Do raportu rozjazdu limit-rynek.", format_liczby=STAWKA)
     wejscie("bonus_spoleczny", "Bonus rewitalizacyjny / Za zyciem",
             ps.bonus_rewitalizacyjny, "TRUE/FALSE",
             zrodlo="Niedostepny przy finansowaniu zwrotnym.",
@@ -360,6 +357,31 @@ def _zalozenia(wb: Workbook, wynik: Wynik, rej: Rejestr) -> None:
     wejscie("wklad_dostepny", "Zadeklarowany kapital inwestora (opcjonalnie)",
             w.inwestor.dostepny_wklad_wlasny if w.inwestor.zadeklarowany else "", "zl",
             zrodlo="Punkt odniesienia. Nie jest potrzebny do obliczenia.", zolte=True)
+
+    # --- rynek najmu ---
+    wiersz = _sekcja(ws, wiersz, "RYNEK NAJMU — SUFIT FAKTYCZNY, NIE WYLICZANY PRZEZ SILNIK")
+    ry = w.rynek
+    wejscie(
+        "czynsz_rynkowy", "Czynsz rynkowy w tej miejscowosci",
+        ry.czynsz_rynkowy_m2_mies if ry.podano else "",
+        "zl/m2/mies.",
+        zrodlo=(
+            "Poziom akceptowany przez rynek najmu. Silnik go NIE WYLICZA — to obserwacja. "
+            "Pusta komorka znaczy 'nie podano', nie zero. Dotyczy wylacznie puli spolecznej: "
+            "w komunalnej najemca jest gmina."
+        ),
+        format_liczby=STAWKA, zolte=True,
+    )
+    wejscie(
+        "rynek_zrodlo", "Skad ta stawka", ry.zrodlo or "", "",
+        zrodlo="Obowiazkowe, gdy podano stawke. Bez tego wyniku nie da sie odtworzyc.",
+        format_liczby=TEKST, zolte=ry.podano,
+    )
+    wejscie(
+        "rynek_data", "Data obserwacji", ry.data.isoformat() if ry.data else "", "",
+        zrodlo="Rynek najmu zmienia sie szybciej niz wskazniki ustawowe.",
+        format_liczby=TEKST,
+    )
 
     # --- przelaczniki ---
     wiersz = _sekcja(ws, wiersz, "PRZELACZNIKI — KWESTIE OTWARTE, WARTOSCI DOMYSLNE SA ZALOZENIAMI")
@@ -1796,8 +1818,20 @@ def _werdykty(wb: Workbook, wynik: Wynik, rej: Rejestr) -> None:
         wiersz += 1
 
     etykieta("Czynsz rynkowy (pula spoleczna)",
-             "Rozjazd miedzy limitem ustawowym a rynkiem to centralne napiecie modelu.")
-    wart(f"={rej['czynsz_rynkowy']}", STAWKA, kol=2)
+             "Sufit faktyczny. Pusty = nie podano; silnik nie podstawia zadnej wartosci. "
+             "W puli komunalnej nie wystepuje — najemca jest gmina.")
+    wart(f'=IF({rej["czynsz_rynkowy"]}="","nie podano",{rej["czynsz_rynkowy"]})',
+         STAWKA, kol=2)
+    wiersz += 1
+
+    etykieta("Sufit wiazacy (pula spoleczna)",
+             "Nizszy z dwoch: limit ustawowy albo rynek. Limit prawny przesuwa sie "
+             "zmiana udzialu dotacji; sufitu rynkowego nie przesunie nic.")
+    wart(
+        f'=IF({rej["czynsz_rynkowy"]}="","limit ustawowy",'
+        f'IF({rej["czynsz_rynkowy"]}<{rej["spol.limit_wiazacy"]},"rynek","limit ustawowy"))',
+        TEKST, kol=2,
+    )
     wiersz += 1
 
     etykieta("Pulap oplat poza czynszem",

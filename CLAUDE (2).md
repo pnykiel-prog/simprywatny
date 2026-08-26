@@ -64,6 +64,8 @@ Nie dodawaj opłat z art. 28 ust. 4 do czynszu. To osobny strumień z własnym l
 
 Nie generuj arkusza z wklejonymi wynikami. Arkusz bez formuł jest nieweryfikowalny i nie nadaje się do dokumentacji wniosku.
 
+Nie podstawiaj wartości, której narzędzie nie dostało na wejściu. Dotyczy to w szczególności danych rynkowych, wskaźników publikowanych okresowo i stóp zewnętrznych. Brak danej ma dawać jawny stan „nie podano" i — gdzie to możliwe — pytanie skierowane do użytkownika. Oszacowanie bez źródła wygląda w wyniku identycznie jak dana rzeczywista i to jest dokładnie ten rodzaj błędu, którego w narzędziu finansowym nie da się później wykryć.
+
 ---
 
 ## Kryteria ukończenia

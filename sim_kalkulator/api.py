@@ -317,37 +317,166 @@ def _kaskada(r: Wynik) -> Dict[str, Any]:
     }
 
 
-def _czynsz_poziomy(r: Wynik) -> Dict[str, Any]:
-    """Trzy poziomy czynszu na wspolnej skali (rozdz. 4.3)."""
-    limit = r.limity_spoleczna.limit_wiazacy_m2_mies
-    potrzebny = r.czynsz_domykajacy_m2_mies
-    rynkowy = r.wejscie.pula_spoleczna.czynsz_rynkowy_m2_mies
-    zdanie = ""
-    if potrzebny is None:
-        zdanie = (
-            "Żadna stawka czynszu nie domknęłaby tej inwestycji sama — potrzebny kredyt "
-            "przekracza ustawowe 80% kosztów. Różnicę musi pokryć kapitał albo dotacja."
-        )
-    elif potrzebny > limit:
-        zdanie = (
-            f"Żeby inwestycja spłacała się sama, czynsz musiałby wynosić "
-            f"{_dziesietnie(potrzebny)} zł. Przepisy pozwalają najwyżej na "
-            f"{_dziesietnie(limit)} zł. "
-            "Tę różnicę musi pokryć kapitał albo wyższa dotacja."
-        )
+def _wiersz_czynszu(
+    nazwa: str, etykieta: str, przyjety: Decimal, limity, wymagany: Optional[Decimal],
+    rynkowy: Optional[Decimal],
+) -> Dict[str, Any]:
+    """Jeden wiersz wykresu czynszowego — errata nr 1, rozdz. 6.2.
+
+    Sufity: prawny (wyliczany przez silnik) i — wylacznie w puli spolecznej —
+    faktyczny, czyli poziom akceptowany przez rynek. Wiaze nizszy z nich.
+    """
+    sufity = [(limity.limit_wiazacy_m2_mies, "prawny")]
+    if rynkowy is not None:
+        sufity.append((rynkowy, "rynkowy"))
+    najnizszy, rodzaj = min(sufity, key=lambda para: para[0])
+
+    if wymagany is None:
+        miesci = None
     else:
-        zdanie = (
-            f"Czynsz domykający inwestycję bez wkładu własnego to "
-            f"{_dziesietnie(potrzebny)} zł i mieści się w limicie "
-            f"{_dziesietnie(limit)} zł."
-        )
+        miesci = wymagany <= najnizszy
     return {
-        "potrzebny": _liczba(potrzebny),
-        "limit": _liczba(limit),
+        "pula": nazwa,
+        "etykieta": etykieta,
+        "przyjety": _liczba(przyjety),
+        "wymagany": _liczba(wymagany),
+        "limit": _liczba(limity.limit_wiazacy_m2_mies),
+        "limit_zrodlo": limity.limit_wiazacy_zrodlo,
         "rynkowy": _liczba(rynkowy),
-        "zakladany": _liczba(r.limity_spoleczna.czynsz_zakladany_m2_mies),
-        "zdanie": zdanie,
+        "sufit_najnizszy": _liczba(najnizszy),
+        "sufit_rodzaj": rodzaj,
+        "miesci_sie": miesci,
     }
+
+
+def _czynsz_poziomy(r: Wynik) -> Dict[str, Any]:
+    """Zestawienie czynszow — jeden wykres, jedna skala, dwa wiersze.
+
+    Errata nr 1, rozdz. 6. Cale pytanie brzmi: czy podloga miesci sie pod
+    najnizszym z sufitow. Wiersze na wspolnej skali, zeby roznica limitow byla
+    widoczna. Zadnego uśredniania miedzy pulami — wyszlaby liczba, ktorej nie da
+    sie pobrac w zadnej z nich.
+    """
+    rynek = r.wejscie.rynek
+    rynkowy = rynek.czynsz_rynkowy_m2_mies
+    wymagany_s = r.czynsz_domykajacy_m2_mies
+
+    wiersze = []
+    if r.projekcja.spoleczna.aktywna:
+        wiersze.append(_wiersz_czynszu(
+            "spoleczna", "Mieszkania społeczne",
+            r.limity_spoleczna.czynsz_zakladany_m2_mies, r.limity_spoleczna,
+            wymagany_s, rynkowy,
+        ))
+    if r.projekcja.komunalna.aktywna:
+        # Sufit rynkowy w puli komunalnej NIE WYSTEPUJE — najemca jest gmina,
+        # a oplaty podnajemcow sa ustawione na poziomie zasobu komunalnego.
+        wiersze.append(_wiersz_czynszu(
+            "komunalna", "Mieszkania komunalne",
+            r.limity_komunalna.czynsz_zakladany_m2_mies, r.limity_komunalna,
+            r.czynsz_wymagany_komunalna, None,
+        ))
+
+    return {
+        "wiersze": wiersze,
+        "rynek_podano": rynek.podano,
+        "rynek_zrodlo": rynek.zrodlo,
+        "rynek_data": rynek.data.isoformat() if rynek.data else None,
+        "pytanie": _pytanie_rynkowe(wymagany_s) if not rynek.podano else "",
+        "ocena_rynkowa": _ocena_rynkowa(wymagany_s, rynkowy),
+        "zdanie": _zdanie_czynszowe(wiersze),
+    }
+
+
+def _pytanie_rynkowe(wymagany: Optional[Decimal]) -> str:
+    """Gdy stawki rynkowej nie podano — pytanie zamiast wymyslonej liczby.
+
+    Errata nr 1, rozdz. 3.2. Zamienia brakujaca dana w decyzje, ktora uzytkownik
+    i tak musi podjac — a on te odpowiedz zna, tylko nie ma jej w arkuszu.
+    """
+    if wymagany is None:
+        return (
+            "Żadna stawka czynszu nie domknęłaby tej inwestycji sama. Nie wiemy też, "
+            "ile płaci się za najem w tej miejscowości — podaj stawkę rynkową, żeby "
+            "narzędzie mogło sprawdzić także ten sufit."
+        )
+    return (
+        f"Żeby inwestycja spłacała się sama, czynsz musiałby wynosić "
+        f"{_dziesietnie(wymagany)} zł za metr. Czy w tej miejscowości ktoś tyle "
+        f"zapłaci? Jeśli nie — różnicę pokryje kapitał albo wyższa dotacja."
+    )
+
+
+def _ocena_rynkowa(wymagany: Optional[Decimal], rynkowy: Optional[Decimal]) -> str:
+    """Zdanie oceniajace, gdy stawka rynkowa zostala podana — rozdz. 3.3."""
+    if rynkowy is None:
+        return ""
+    if wymagany is None:
+        return (
+            "Żadna stawka czynszu nie domknęłaby tej inwestycji sama, więc porównanie "
+            "z rynkiem niczego nie ratuje — potrzebny kredyt przekracza ustawowy pułap."
+        )
+    if wymagany <= rynkowy:
+        return (
+            "Czynsz potrzebny do domknięcia mieści się poniżej poziomu rynkowego. "
+            "Popyt nie powinien być barierą."
+        )
+    return (
+        f"Czynsz potrzebny do domknięcia jest o {_dziesietnie(wymagany - rynkowy)} zł "
+        f"wyższy niż rynkowy. Na tym rynku takich stawek się nie uzyska — montaż wymaga "
+        f"większego kapitału, wyższej partycypacji albo MNIEJSZEGO udziału mieszkań "
+        f"komunalnych."
+    )
+
+
+def _zdanie_czynszowe(wiersze: list) -> str:
+    """Jedno zdanie opisujace stan wiazacy — rozdz. 6.3.
+
+    Rozroznienie, KTORY sufit wiaze, jest kluczowe dla decyzji: sufit prawny
+    przesuwa sie zmiana udzialu dotacji, sufitu rynkowego nie przesunie nic.
+    """
+    if not wiersze:
+        return ""
+
+    przekraczajace = [w for w in wiersze if w["miesci_sie"] is False]
+    nieosiagalne = [w for w in wiersze if w["wymagany"] is None]
+
+    if not przekraczajace and not nieosiagalne:
+        czesci = []
+        for w in wiersze:
+            czesc = (
+                f"{w['etykieta'].lower()}: czynsz {_dziesietnie(w['przyjety'])} zł "
+                f"mieści się pod limitem ustawowym {_dziesietnie(w['limit'])} zł"
+            )
+            if w["rynkowy"] is not None:
+                czesc += f" i pod stawką rynkową {_dziesietnie(w['rynkowy'])} zł"
+            czesci.append(czesc)
+        return (
+            "Wszystko mieści się pod sufitami. "
+            + "; ".join(czesci).capitalize()
+            + "."
+        )
+
+    if nieosiagalne:
+        w = nieosiagalne[0]
+        return (
+            f"W wierszu „{w['etykieta'].lower()}" + "” nie ma stawki, która domknęłaby "
+            "montaż — brakującego kapitału nie da się zamienić na czynsz. Pokryje go wkład "
+            "własny albo wyższa dotacja."
+        )
+
+    w = przekraczajace[0]
+    if w["sufit_rodzaj"] == "rynkowy":
+        return (
+            f"W wierszu „{w['etykieta'].lower()}" + "” czynsz musiałby wynosić "
+            f"{_dziesietnie(w['wymagany'])} zł. Przepisy na to pozwalają, ale na tym rynku "
+            f"płaci się {_dziesietnie(w['rynkowy'])} zł — takich stawek się nie uzyska."
+        )
+    return (
+        f"W wierszu „{w['etykieta'].lower()}" + "” czynsz musiałby wynosić "
+        f"{_dziesietnie(w['wymagany'])} zł, a przepisy pozwalają najwyżej na "
+        f"{_dziesietnie(w['limit'])} zł. Tę różnicę pokryje kapitał."
+    )
 
 
 def _zapas_rekompensaty(r: Wynik) -> Dict[str, Any]:
@@ -807,11 +936,32 @@ def zakresy_json(r: Wynik) -> Dict[str, Any]:
             {"klucz": "grunt.wartosc", "etykieta": "Wartość gruntu z operatu",
              "wartosc": _liczba(w.grunt.wartosc), "jednostka": "zl",
              "podpis": "Im droższy grunt, tym wyższa dopuszczalna dotacja."},
+            {"klucz": "rynek.czynsz_rynkowy_m2_mies",
+             "etykieta": "Czynsz rynkowy w tej miejscowości (opcjonalnie)",
+             "wartosc": _liczba(w.rynek.czynsz_rynkowy_m2_mies), "jednostka": "zl/m2/mies.",
+             "podpis": "Przeciętny czynsz najmu w tej miejscowości. Najprościej: przejrzyj "
+                       "kilkanaście aktualnych ofert mieszkań o podobnym metrażu i weź "
+                       "medianę. Zapisz, skąd wzięta — będzie potrzebne przy weryfikacji "
+                       "założeń. Bez tej wartości narzędzie zadaje pytanie zamiast zgadywać."},
+            {"klucz": "rynek.zrodlo", "etykieta": "Skąd ta stawka", "typ": "tekst",
+             "wartosc": w.rynek.zrodlo, "jednostka": "",
+             "podpis": "Wymagane, gdy podajesz stawkę. Np. „mediana z 15 ofert 40–55 m², "
+                       "portal ogłoszeniowy”."},
             {"klucz": "inwestor.dostepny_wklad_wlasny", "etykieta": "Twój kapitał (opcjonalnie)",
              "wartosc": _liczba(w.inwestor.dostepny_wklad_wlasny), "jednostka": "zl",
              "podpis": "Punkt odniesienia. Zostaw puste, a narzędzie po prostu poda "
                        "wymaganą kwotę."},
         ],
+        # Rozdz. 4 erraty: lokalizacja sluzy WYLACZNIE do opisu. Nazwa gminy
+        # i wojewodztwo trafiaja na naglowek arkusza i do nazwy zestawu zalozen.
+        # Nic z nich nie jest liczone i narzedzie niczego z nich nie wyprowadza.
+        "lokalizacja": {
+            "gmina": w.projekt.gmina,
+            "wojewodztwo": w.projekt.wojewodztwo,
+            "podpis": "Gmina i województwo służą wyłącznie do opisu — trafiają na nagłówek "
+                      "arkusza i do nazwy zapisywanego zestawu założeń. Narzędzie nie "
+                      "wyprowadza z nich żadnej wartości.",
+        },
         "parametry_rynkowe": {
             "data": w.parametry_zewnetrzne.data_parametrow.isoformat(),
             "przeterminowane": any(
@@ -832,7 +982,9 @@ def zakresy_json(r: Wynik) -> Dict[str, Any]:
                  "wartosc": _liczba(w.parametry_zewnetrzne.stopa_irs_bgk)},
                 {"klucz": "parametry_zewnetrzne.wartosc_odtworzeniowa_m2",
                  "etykieta": "Wartość odtworzeniowa 1 m²",
-                 "wartosc": _liczba(w.parametry_zewnetrzne.wartosc_odtworzeniowa_m2)},
+                 "wartosc": _liczba(w.parametry_zewnetrzne.wartosc_odtworzeniowa_m2),
+                 "podpis": "Wskaźnik przeliczeniowy kosztu odtworzenia 1 m² — z obwieszczenia "
+                           "wojewody dla Twojego województwa. Ogłaszany co pół roku."},
             ],
         },
     }
@@ -845,6 +997,13 @@ def sweep_json(w) -> Dict[str, Any]:
         "podsumowanie": analiza.podsumowanie,
         "maksymalny_udzial": _liczba(analiza.sweep.maksymalny_udzial_komunalny),
         "punkt_graniczny": _liczba(analiza.sweep.punkt_graniczny),
+        # Drugi punkt graniczny — ten, w ktorym wymagany czynsz spoleczny przebija
+        # stawke rynkowa. Bywa wczesniejszy niz kapitalowy i jest calkowicie
+        # niewidoczny, jesli sledzi sie wylacznie limity ustawowe. None, gdy
+        # stawki rynkowej nie podano — narzedzie go wtedy nie wymysla.
+        "punkt_graniczny_rynkowy": _liczba(analiza.sweep.punkt_graniczny_rynkowy),
+        "punkt_graniczny_wiazacy": _liczba(analiza.sweep.punkt_graniczny_wiazacy),
+        "rodzaj_punktu_wiazacego": analiza.sweep.rodzaj_punktu_wiazacego,
         "test_blokujacy": analiza.sweep.test_blokujacy,
         "punkty": [
             {
@@ -854,6 +1013,8 @@ def sweep_json(w) -> Dict[str, Any]:
                 "werdykty": list(p.werdykty),
                 "wiazace_ograniczenie": p.wiazace_ograniczenie,
                 "wklad_wymagany": _liczba(p.wklad_wymagany),
+                "czynsz_domykajacy": _liczba(p.czynsz_domykajacy),
+                "miesci_sie_w_rynku": p.miesci_sie_w_rynku,
                 "powod": p.powod_niepoliczalnosci,
                 "luki": [
                     {"opis": o, "kwota": _liczba(k), "jednostka": j} for o, k, j in p.luki

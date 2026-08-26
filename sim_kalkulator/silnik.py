@@ -141,7 +141,11 @@ def czynsz_domykajacy_bez_wkladu(
     Zwraca None, gdy zadna stawka nie wystarczy — na przyklad gdy potrzebny
     kredyt przekracza ustawowe 80% kosztow.
     """
-    if not a.spoleczna.aktywna or kredyt_potrzebny <= ZERO:
+    if not a.spoleczna.aktywna:
+        # Przy samych mieszkaniach komunalnych nie ma najemcow spolecznych,
+        # wiec nie ma stawki, ktora cokolwiek domyka. To nie jest zero.
+        return None
+    if kredyt_potrzebny <= ZERO:
         return ZERO
     k = w.pula_spoleczna.kredyt
     okresy_splaty = k.okres_lat - k.karencja_lat
@@ -176,6 +180,32 @@ def czynsz_domykajacy_bez_wkladu(
         )
         potrzebny_przychod = rok.koszty_operacyjne + kredyt_potrzebny * wspolczynnik
         stawki.append(potrzebny_przychod / przychod_na_zlotowke)
+    return max(stawki) if stawki else None
+
+
+def czynsz_pokrywajacy_pule(proj_puli, czynsz_bazowy: Decimal) -> Optional[Decimal]:
+    """Najnizsza stawka bazowa roku 1, przy ktorej pula pokrywa sie w kazdym roku.
+
+    "Pokrywa sie" znaczy: przychod czynszowy netto wystarcza na koszty biezace
+    i obsluge dlugu, bez doplacania z kapitalu w trakcie eksploatacji.
+
+    Przychod jest wprost proporcjonalny do stawki bazowej, a wymagane pokrycie
+    od niej nie zalezy, wiec kazdy rok daje wlasna minimalna stawke; wiazaca jest
+    najwieksza z nich. Indeksacja czynszu i kosztow siedzi juz w projekcji, wiec
+    wynik wraca sprowadzony do stawki roku 1 — porownywalnej z limitem i z rynkiem.
+
+    Liczone OSOBNO dla kazdej puli. Jedna stawka wazona udzialem pul bylaby
+    liczba, ktorej nie da sie pobrac w zadnej z nich: obie maja wlasne limity
+    i wlasnych najemcow.
+    """
+    if proj_puli is None or not proj_puli.aktywna or czynsz_bazowy <= ZERO:
+        return None
+    stawki = []
+    for rok in proj_puli.lata:
+        if rok.przychod_czynszowy_netto <= ZERO:
+            return None
+        przychod_na_zlotowke = rok.przychod_czynszowy_netto / czynsz_bazowy
+        stawki.append(rok.wymagane_pokrycie / przychod_na_zlotowke)
     return max(stawki) if stawki else None
 
 
@@ -234,13 +264,47 @@ class Wynik:
         )
 
     @property
+    def czynsz_wymagany_komunalna(self) -> Optional[Decimal]:
+        """Podloga czynszowa puli komunalnej — stawka pokrywajaca koszty biezace.
+
+        Pula komunalna nie ma kredytu (art. 5a ust. 3), wiec nie ma czym zamienic
+        przyszlego czynszu na kapital poczatkowy. Zerowego wkladu wlasnego nie da
+        sie w niej osiagnac zadna stawka — 20% kosztow poza dotacja to luka
+        strukturalna, ktora pokrywa kapital. Podloga oznacza tu wiec: ponizej tej
+        stawki pula dokłada do siebie co roku.
+        """
+        return czynsz_pokrywajacy_pule(
+            self.projekcja.komunalna,
+            self.wejscie.pula_komunalna.czynsz_placony_przez_gmine_m2_mies,
+        )
+
+    @property
     def czynsz_domykajacy_m2_mies(self) -> Optional[Decimal]:
-        """Czynsz, przy ktorym inwestycja splacalaby sie sama — rozdz. 4.3."""
+        """Podloga czynszowa puli spolecznej — stawka przy zerowym wkladzie wlasnym.
+
+        Errata nr 1, rozdz. 5: w wariancie hybrydowym rownanie ma dwie niewiadome
+        i jedno rownanie, wiec trzeba przyjac, ktora stawke traktujemy jako dana.
+        CZYNSZ KOMUNALNY JEST ZADANY, SPOLECZNY DOMYKA. Uzasadnienie jest
+        praktyczne: stawke komunalna negocjuje sie z gmina i zapisuje w umowie,
+        a limit przy dotacji 80% i tak przyciska ja do 2,5% wartosci odtworzeniowej
+        rocznie. Czynsz spoleczny zostaje wielkoscia residualna — dokladnie tak
+        jak wklad wlasny w warstwie kapitalowej.
+
+        Silnik liczy wiec: przy tej stawce od gminy, ile musza placic najemcy
+        spoleczni, zeby pula spoleczna obeszla sie bez wkladu wlasnego. I ta
+        liczba idzie na test rynkowy.
+        """
+        # Luka kapitalowa CALEGO przedsiewziecia, nie samej puli spolecznej.
+        # Kredyt jest jedynym instrumentem, ktory zamienia przyszly czynsz na
+        # kapital poczatkowy, a przysluguje wylacznie puli spolecznej (art. 5a
+        # ust. 3). Ciezar domkniecia obu pul spada wiec na czynsz spoleczny —
+        # i dlatego rosnie on wraz z udzialem puli komunalnej, ktora wnosi mniej:
+        # nizszy limit czynszu, brak kredytu, brak partycypacji.
         potrzebny = (
-            self.alokacja.spoleczna.koszty_przedsiewziecia
-            - self.finansowanie.spoleczna.grant
-            - self.finansowanie.spoleczna.partycypacja
-            - self.finansowanie.spoleczna.wklad_rzeczowy
+            self.alokacja.koszty_laczne
+            - self.finansowanie.grant_laczny
+            - self.finansowanie.partycypacja_laczna
+            - self.finansowanie.wklad_rzeczowy_laczny
         )
         return czynsz_domykajacy_bez_wkladu(
             self.wejscie, self.alokacja, self.granty,

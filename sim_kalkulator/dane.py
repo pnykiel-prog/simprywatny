@@ -299,7 +299,6 @@ class PulaSpoleczna:
     partycypacja: Partycypacja
     czynsz_zakladany_m2_mies: Decimal
     bonus_rewitalizacyjny: bool             # tylko gdy brak kredytu, art. 13 ust. 4
-    czynsz_rynkowy_m2_mies: Optional[Decimal] = None
 
 
 # ---------------------------------------------------------------------------
@@ -344,6 +343,33 @@ class ParametryZewnetrzne:
         return (na_dzien.year - self.data_parametrow.year) * 12 + (
             na_dzien.month - self.data_parametrow.month
         )
+
+
+@dataclass(frozen=True)
+class Rynek:
+    """Obserwacja o rynku najmu — nie jest liczona, tylko podawana.
+
+    Na czynsz w puli spolecznej dzialaja TRZY sufity, nie dwa: dwa limity ustawowe,
+    ktore silnik wylicza, i poziom akceptowany przez rynek, ktorego wyliczyc sie
+    nie da. Trzeci nie jest mniej realny od dwoch pierwszych — czynsz zgodny
+    z ustawa, ale wyzszy od tego, co mozna uzyskac w danej miejscowosci, daje
+    pustostany, a nie przychod.
+
+    Pole jest opcjonalne i puste niczego nie blokuje. Gdy jednak wartosc podano,
+    zrodlo jest obowiazkowe: liczba bez zrodla wyglada w wyniku identycznie jak
+    dana rzeczywista i wchodzi do rozmowy z gmina jako argument.
+
+    W puli komunalnej ten sufit NIE WYSTEPUJE — najemca jest gmina, a oplaty
+    podnajemcow sa ustawione na poziomie zasobu komunalnego.
+    """
+
+    czynsz_rynkowy_m2_mies: Optional[Decimal] = None
+    zrodlo: Optional[str] = None
+    data: Optional[_dt.date] = None
+
+    @property
+    def podano(self) -> bool:
+        return self.czynsz_rynkowy_m2_mies is not None
 
 
 @dataclass(frozen=True)
@@ -415,6 +441,7 @@ class Wejscie:
     parametry_zewnetrzne: ParametryZewnetrzne
     rekompensata: Rekompensata
     inwestor: Inwestor
+    rynek: Rynek
     przelaczniki: Przelaczniki
     ostrzezenia: Sequence[Ostrzezenie] = field(default_factory=tuple)
 
@@ -476,6 +503,12 @@ def _kwota(sekcja: Mapping[str, Any], klucz: str, sciezka: str) -> Decimal:
         return zl(sekcja[klucz])
     except (InvalidOperation, TypeError, ValueError) as exc:
         raise BladWalidacji(f"'{sciezka}.{klucz}' nie jest liczba: {sekcja[klucz]!r}") from exc
+
+
+def _data_opcjonalna(sekcja: Mapping[str, Any], klucz: str, sciezka: str) -> Optional[_dt.date]:
+    if klucz not in sekcja or sekcja[klucz] is None:
+        return None
+    return _data(sekcja, klucz, sciezka)
 
 
 def _kwota_opcjonalna(sekcja: Mapping[str, Any], klucz: str, sciezka: str) -> Optional[Decimal]:
@@ -613,13 +646,17 @@ def zbuduj(dane: Mapping[str, Any], na_dzien: Optional[_dt.date] = None) -> Wejs
         ),
         rotacja_roczna=_kwota(sp_part, "rotacja_roczna", "pula_spoleczna.partycypacja"),
     )
-    czynsz_rynkowy = ss.get("czynsz_rynkowy_m2_mies")
+    if "czynsz_rynkowy_m2_mies" in ss:
+        raise BladWalidacji(
+            "'pula_spoleczna.czynsz_rynkowy_m2_mies' zostal przeniesiony do osobnej sekcji "
+            "'rynek'. Stawka rynkowa nie jest parametrem puli, tylko obserwacja o rynku "
+            "najmu w danej miejscowosci, i wymaga podania zrodla."
+        )
     pula_spoleczna = PulaSpoleczna(
         kredyt=kredyt,
         partycypacja=partycypacja,
         czynsz_zakladany_m2_mies=_kwota(ss, "czynsz_zakladany_m2_mies", "pula_spoleczna"),
         bonus_rewitalizacyjny=_flaga(ss, "bonus_rewitalizacyjny", "pula_spoleczna"),
-        czynsz_rynkowy_m2_mies=zl(czynsz_rynkowy) if czynsz_rynkowy is not None else None,
     )
 
     sko = _sekcja(dane, "pula_komunalna")
@@ -665,6 +702,19 @@ def zbuduj(dane: Mapping[str, Any], na_dzien: Optional[_dt.date] = None) -> Wejs
         ),
         data_parametrow=_data(sz, "data_parametrow", "parametry_zewnetrzne"),
         zrodla=dict(sz.get("zrodla") or {}),
+    )
+
+    # Sekcja opcjonalna w calosci — brak stawki rynkowej niczego nie blokuje.
+    sy = dane.get("rynek") or {}
+    if not isinstance(sy, Mapping):
+        raise BladWalidacji(
+            f"Sekcja 'rynek' musi byc mapowaniem, jest {type(sy).__name__}."
+        )
+    stawka_rynkowa = sy.get("czynsz_rynkowy_m2_mies")
+    rynek = Rynek(
+        czynsz_rynkowy_m2_mies=zl(stawka_rynkowa) if stawka_rynkowa is not None else None,
+        zrodlo=(str(sy["zrodlo"]).strip() or None) if sy.get("zrodlo") else None,
+        data=_data_opcjonalna(sy, "data", "rynek"),
     )
 
     sr = _sekcja(dane, "rekompensata")
@@ -746,6 +796,7 @@ def zbuduj(dane: Mapping[str, Any], na_dzien: Optional[_dt.date] = None) -> Wejs
         parametry_zewnetrzne=parametry,
         rekompensata=rekompensata,
         inwestor=inwestor,
+        rynek=rynek,
         przelaczniki=przelaczniki,
     )
     ostrzezenia = waliduj(wejscie, na_dzien=na_dzien)
@@ -765,6 +816,7 @@ def waliduj(w: Wejscie, na_dzien: Optional[_dt.date] = None) -> List[Ostrzezenie
     _waliduj_bonus(w)
     _waliduj_partycypacje(w, ostrzezenia)
     _waliduj_grunt(w, ostrzezenia)
+    _waliduj_rynek(w, ostrzezenia)
     _waliduj_eksploatacje(w)
     _waliduj_parametry(w, ostrzezenia, na_dzien)
     _waliduj_przelaczniki(w, ostrzezenia)
@@ -1060,6 +1112,64 @@ def _waliduj_grunt(w: Wejscie, ostrzezenia: List[Ostrzezenie]) -> None:
                 f"'grunt.cena_nabycia' ({g.cena_nabycia}) przewyzsza wartosc z operatu "
                 f"({g.wartosc}). Bonifikata obniza cene, nie podnosi jej."
             )
+
+
+def _waliduj_rynek(w: Wejscie, ostrzezenia: List[Ostrzezenie]) -> None:
+    """Stawka rynkowa jest opcjonalna, ale nie moze byc anonimowa.
+
+    Errata nr 1, rozdz. 3.1: pole `zrodlo` jest obowiazkowe, gdy podano wartosc.
+    Liczba bez zrodla wyglada w wyniku identycznie jak dana rzeczywista i wchodzi
+    do rozmowy z gmina jako argument — a nikt jej pozniej nie odtworzy.
+    """
+    r = w.rynek
+    if not r.podano:
+        if r.zrodlo or r.data:
+            ostrzezenia.append(
+                Ostrzezenie(
+                    kod="RYNEK_ZRODLO_BEZ_WARTOSCI",
+                    tresc=(
+                        "W sekcji 'rynek' podano zrodlo albo date, ale nie podano samej "
+                        "stawki 'czynsz_rynkowy_m2_mies'. Sufit rynkowy pozostaje nieznany."
+                    ),
+                    podstawa="",
+                    tresc_potoczna=(
+                        "Podano opis źródła stawki rynkowej, ale nie samą stawkę — "
+                        "narzędzie nadal jej nie zna."
+                    ),
+                    waga=Waga.POZOSTALE,
+                )
+            )
+        return
+
+    if r.czynsz_rynkowy_m2_mies <= ZERO:
+        raise BladWalidacji(
+            "'rynek.czynsz_rynkowy_m2_mies' musi byc dodatni. Zeby zostawic stawke "
+            "nieznana, usun to pole zamiast wpisywac zero."
+        )
+    if not r.zrodlo:
+        raise BladWalidacji(
+            "Podano 'rynek.czynsz_rynkowy_m2_mies', ale nie podano 'rynek.zrodlo'. "
+            "Stawka rynkowa jest obserwacja, nie wyliczeniem — bez wskazania, skad "
+            "pochodzi, nie da sie jej pozniej zweryfikowac ani odtworzyc wyniku. "
+            "Wpisz np. 'mediana z 15 ofert najmu 40-55 m2, otodom, 2026-08'."
+        )
+    if r.data is None:
+        ostrzezenia.append(
+            Ostrzezenie(
+                kod="RYNEK_BEZ_DATY",
+                tresc=(
+                    "Stawka rynkowa nie ma podanej daty obserwacji. Rynek najmu zmienia "
+                    "sie szybciej niz wskazniki ustawowe — bez daty nie wiadomo, jak stara "
+                    "jest ta liczba."
+                ),
+                podstawa="",
+                tresc_potoczna=(
+                    "Stawka rynkowa nie ma daty. Warto ją dopisać — rynek najmu zmienia się "
+                    "szybko."
+                ),
+                waga=Waga.POZOSTALE,
+            )
+        )
 
 
 def _waliduj_eksploatacje(w: Wejscie) -> None:

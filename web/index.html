@@ -150,6 +150,12 @@ text{font-family:inherit}
 .tabela-widok th:first-child,.tabela-widok td:first-child{text-align:left}
 .tabela-widok th{color:var(--tekst-3);font-weight:600}
 
+/* Brakująca dana zamieniona w pytanie — nigdy w oszacowanie. */
+.prosba{font-size:11px;color:var(--uwaga);margin-top:3px;line-height:1.35}
+input[aria-invalid="true"]{border-color:var(--uwaga)}
+.pytanie{background:var(--tlo);border-left:3px solid var(--akcent);border-radius:0 5px 5px 0;
+  padding:8px 11px;margin-top:8px;font-size:12.5px;line-height:1.45;font-style:italic}
+
 /* ---------- komunikaty ---------- */
 .komunikat{background:var(--karta);border:1px solid var(--linia);border-left:4px solid var(--uwaga);
   border-radius:0 5px 5px 0;padding:8px 11px;margin-bottom:7px;font-size:12.5px;line-height:1.45}
@@ -258,9 +264,9 @@ button.akcja:disabled{opacity:.55;cursor:progress}
       </div>
 
       <div class="karta">
-        <h2>Czynsz — trzy poziomy</h2>
+        <h2>Czynsz — podłoga i sufity</h2>
         <svg id="w-czynsz" class="wykres" viewBox="0 0 620 160" role="img"
-             aria-label="Porównanie czynszu domykającego, limitu i stawki rynkowej"></svg>
+             aria-label="Czynsz przyjęty i wymagany na tle limitu ustawowego i stawki rynkowej, osobno dla każdej puli"></svg>
         <div class="podpis-wykresu" id="p-czynsz"></div>
       </div>
 
@@ -494,14 +500,23 @@ function rysujNegocjacje(s, biezacyUdzial){
     svg.appendChild(g);
   });
 
-  // granica domkniecia
-  if (s.punkt_graniczny != null){
-    const xg = x(s.punkt_graniczny);
-    svg.appendChild(el("line", {x1:xg, y1:GORA, x2:xg, y2:H-DOL, stroke:"var(--zle)",
-      "stroke-width":1.5, "stroke-dasharray":"4 3"}));
-    svg.appendChild(el("text", {x:xg-5, y:GORA+11, "text-anchor":"end", class:"etykieta-serii",
-      fill:"var(--zle)"}, "granica " + proc(s.punkt_graniczny)));
-  }
+  // Dwa punkty graniczne, nie jeden. Kapitałowy — kończy się kapitał inwestora.
+  // Rynkowy — wymagany czynsz społeczny przebija stawkę rynkową; bywa wcześniejszy
+  // i jest niewidoczny, jeśli śledzi się wyłącznie limity ustawowe. Gdy stawki
+  // rynkowej nie podano, drugiego punktu po prostu nie ma.
+  const granice = [
+    {u: s.punkt_graniczny, opis: "kapitał", kolor: "var(--zle)", gora: true},
+    {u: s.punkt_graniczny_rynkowy, opis: "rynek", kolor: "var(--s2)", gora: false},
+  ].filter(g => g.u != null);
+  granice.forEach((g) => {
+    const xg = x(g.u);
+    const wiazacy = s.punkt_graniczny_wiazacy != null && g.u === s.punkt_graniczny_wiazacy;
+    svg.appendChild(el("line", {x1:xg, y1:GORA, x2:xg, y2:H-DOL, stroke:g.kolor,
+      "stroke-width": wiazacy ? 2.5 : 1.5, "stroke-dasharray":"4 3"}));
+    svg.appendChild(el("text", {x:xg-5, y:GORA + (g.gora ? 11 : 25), "text-anchor":"end",
+      class:"etykieta-serii", fill:g.kolor},
+      g.opis + " " + proc(g.u) + (wiazacy && granice.length > 1 ? " ◀ wiąże" : "")));
+  });
   // znacznik biezacego ustawienia
   const xb = x(biezacyUdzial);
   svg.appendChild(el("line", {x1:xb, y1:GORA, x2:xb, y2:H-DOL, stroke:"var(--akcent)",
@@ -514,39 +529,111 @@ function rysujNegocjacje(s, biezacyUdzial){
   $("#p-negocjacja").textContent = s.podsumowanie;
 }
 
-/* ================= WYKRES 3 — trzy poziomy czynszu ================= */
+/* ================= WYKRES 3 — podłoga i sufity czynszowe =================
+   Dwa wiersze na wspólnej skali. Pytanie brzmi: czy podłoga mieści się pod
+   najniższym z sufitów. Sufit rynkowy dotyczy wyłącznie puli społecznej —
+   w komunalnej najemcą jest gmina. */
 function rysujCzynsz(c){
   const svg = $("#w-czynsz"); czysc(svg);
-  const W = 620, H = 160, L = 168, R = 96, GORA = 10;
-  const pozycje = [
-    {n:"Potrzebny, by spłacał się sam", v:c.potrzebny, k:"var(--s1)"},
-    {n:"Limit ustawowy", v:c.limit, k:"var(--s2)"},
-    {n:"Stawka rynkowa", v:c.rynkowy, k:"var(--s3)"},
-  ].filter(p => p.v != null);
-  const maks = Math.max(...pozycje.map(p => p.v)) * 1.1 || 1;
-  const wys = 26, odstep = 14;
-  pozycje.forEach((p, i) => {
-    const y = GORA + i*(wys+odstep);
-    const dl = (W-L-R) * (p.v/maks);
-    svg.appendChild(el("text", {x:L-10, y:y+wys/2+4, "text-anchor":"end", class:"os",
-      fill:"var(--tekst-2)"}, p.n));
-    const g = el("g", {});
-    g.appendChild(el("rect", {x:L, y, width:Math.max(2,dl), height:wys, rx:4, fill:p.k,
-      stroke:"var(--karta)", "stroke-width":2}));
-    tytulHover(g, p.n + ": " + zl2(p.v) + " zł/m² miesięcznie");
-    g.appendChild(el("text", {x:L+dl+8, y:y+wys/2+4, class:"etykieta-serii", fill:"var(--tekst)"},
-      zl2(p.v) + " zł/m²"));
-    svg.appendChild(g);
-  });
-  // zakladany czynsz jako znacznik pionowy
-  if (c.zakladany != null){
-    const xz = L + (W-L-R) * (c.zakladany/maks);
-    svg.appendChild(el("line", {x1:xz, y1:GORA-4, x2:xz, y2:GORA+pozycje.length*(wys+odstep)-odstep+4,
-      stroke:"var(--tekst-3)", "stroke-width":1.5, "stroke-dasharray":"4 3"}));
-    svg.appendChild(el("text", {x:xz, y:GORA+pozycje.length*(wys+odstep)+6, "text-anchor":"middle",
-      class:"os"}, "ustawiony " + zl2(c.zakladany)));
+  const W = 620, L = 150, R = 84, GORA = 16, WYS_W = 62;
+  const wiersze = c.wiersze || [];
+  const H = Math.max(120, GORA + wiersze.length * WYS_W + 34);
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  if (!wiersze.length){
+    svg.appendChild(el("text", {x:W/2, y:H/2, "text-anchor":"middle", class:"os"},
+      "Brak aktywnej puli."));
+    $("#p-czynsz").textContent = c.zdanie || "";
+    return;
   }
-  $("#p-czynsz").textContent = c.zdanie;
+
+  // Jedna wspólna skala dla obu wierszy — tylko wtedy różnica limitów jest widoczna.
+  const wartosci = [];
+  wiersze.forEach(w => [w.przyjety, w.wymagany, w.limit, w.rynkowy]
+    .forEach(v => { if (v != null) wartosci.push(v); }));
+  const maks = Math.max(...wartosci) * 1.12 || 1;
+  const x = (v) => L + (W-L-R) * (v/maks);
+
+  wiersze.forEach((w, i) => {
+    const gora = GORA + i*WYS_W;
+    svg.appendChild(el("text", {x:L-10, y:gora+15, "text-anchor":"end",
+      class:"etykieta-serii", fill:"var(--tekst)"}, w.etykieta));
+
+    // słupek wypełniony — czynsz przyjęty w modelu
+    const gp = el("g", {});
+    gp.appendChild(el("rect", {x:L, y:gora+4, width:Math.max(2, x(w.przyjety)-L), height:15,
+      rx:3, fill:"var(--s1)"}));
+    tytulHover(gp, "Czynsz przyjęty w modelu: " + zl2(w.przyjety) + " zł/m²/mies.");
+    svg.appendChild(gp);
+    svg.appendChild(el("text", {x:x(w.przyjety)+6, y:gora+16, class:"os",
+      fill:"var(--tekst-2)"}, zl2(w.przyjety)));
+
+    // słupek konturowy — czynsz wymagany, czyli podłoga
+    const gw = el("g", {});
+    if (w.wymagany != null){
+      const kolor = w.miesci_sie ? "var(--dobrze)" : "var(--zle)";
+      const xw = x(w.wymagany);
+      gw.appendChild(el("rect", {x:L, y:gora+24, width:Math.max(2, xw-L), height:15,
+        rx:3, fill:"none", stroke:kolor, "stroke-width":2, "stroke-dasharray":"1 0"}));
+      // Etykieta ląduje za słupkiem, chyba że wpadłaby na pionowy znacznik
+      // sufitu — wtedy chowa się do wnętrza słupka.
+      const pionowe = [x(w.limit)].concat(w.rynkowy != null ? [x(w.rynkowy)] : []);
+      const koliduje = pionowe.some(xp => xp > xw && xp - xw < 44);
+      svg.appendChild(el("text", {
+        x: koliduje ? xw - 6 : xw + 6, y: gora + 36, class: "os", fill: kolor,
+        "text-anchor": koliduje ? "end" : "start",
+      }, zl2(w.wymagany)));
+      tytulHover(gw, "Czynsz wymagany, żeby pula obeszła się bez dokładania: "
+        + zl2(w.wymagany) + " zł/m²/mies.");
+    } else {
+      svg.appendChild(el("text", {x:L, y:gora+36, class:"os", fill:"var(--zle)"},
+        "żadna stawka nie domyka"));
+    }
+    svg.appendChild(gw);
+
+    // pionowy znacznik — limit ustawowy
+    const xl = x(w.limit);
+    svg.appendChild(el("line", {x1:xl, y1:gora, x2:xl, y2:gora+44,
+      stroke:"var(--tekst)", "stroke-width":2}));
+    svg.appendChild(el("text", {x:xl, y:gora+56, "text-anchor":"middle", class:"os"},
+      "limit " + zl2(w.limit)));
+
+    // linia przerywana — stawka rynkowa; tylko wiersz społeczny może ją mieć
+    if (w.rynkowy != null){
+      const xr = x(w.rynkowy);
+      svg.appendChild(el("line", {x1:xr, y1:gora, x2:xr, y2:gora+44,
+        stroke:"var(--s2)", "stroke-width":2, "stroke-dasharray":"5 3"}));
+      svg.appendChild(el("text", {x:xr, y:gora+56, "text-anchor":"middle", class:"os",
+        fill:"var(--s2)"}, "rynek " + zl2(w.rynkowy)));
+    }
+  });
+
+  // Gdy stawki rynkowej nie podano — trzecie miejsce zostaje puste i zadaje pytanie,
+  // zamiast pokazywać wymyśloną liczbę.
+  const podpis = $("#p-czynsz");
+  podpis.textContent = "";
+  const zdanie = document.createElement("div");
+  zdanie.textContent = c.zdanie || "";
+  podpis.appendChild(zdanie);
+  if (c.ocena_rynkowa){
+    const o = document.createElement("div");
+    o.style.marginTop = "6px";
+    o.textContent = c.ocena_rynkowa;
+    podpis.appendChild(o);
+  }
+  if (!c.rynek_podano && c.pytanie){
+    const q = document.createElement("div");
+    q.className = "pytanie";
+    q.textContent = c.pytanie;
+    podpis.appendChild(q);
+  }
+  if (c.rynek_podano && c.rynek_zrodlo){
+    const z = document.createElement("div");
+    z.className = "info";
+    z.style.marginTop = "6px";
+    z.textContent = "Stawka rynkowa: " + c.rynek_zrodlo
+      + (c.rynek_data ? " (" + c.rynek_data + ")" : "");
+    podpis.appendChild(z);
+  }
 }
 
 /* ================= WYKRES 4 — zapas pomocy publicznej ================= */
@@ -819,19 +906,57 @@ function rysujSuwaki(z){
 }
 
 function rysujPolaLiczbowe(z){
+  // Stawka rynkowa jest obserwacją, nie dźwignią — dlatego pole liczbowe,
+  // nie suwak. Jej źródło jest polem tekstowym i jest obowiązkowe, gdy podano
+  // stawkę; silnik odrzuci wariant bez niego.
   $("#pola-liczbowe").innerHTML = z.pola_liczbowe.map(p => `
     <div class="polex">
       <label for="p-${p.klucz}">${p.etykieta}<span class="jedn">${p.jednostka}</span></label>
       <div class="podpis">${p.podpis}</div>
-      <input id="p-${p.klucz}" type="number" step="any" value="${p.wartosc ?? ""}">
+      <input id="p-${p.klucz}" type="${p.typ === "tekst" ? "text" : "number"}"
+             ${p.typ === "tekst" ? "" : 'step="any"'} value="${p.wartosc ?? ""}">
     </div>`).join("");
   z.pola_liczbowe.forEach((p) => {
     const w = document.getElementById("p-" + p.klucz);
     w.addEventListener("change", () => {
-      if (w.value === "") delete zmiany[p.klucz]; else zmiany[p.klucz] = Number(w.value);
+      if (w.value === "") delete zmiany[p.klucz];
+      else zmiany[p.klucz] = p.typ === "tekst" ? w.value : Number(w.value);
+      if (!stawkaGotowa()) return;
       przelicz();
     });
   });
+  stawkaGotowa();
+}
+
+/* Stawka rynkowa bez źródła jest dla silnika błędem — i słusznie, bo liczba bez
+   źródła wchodzi do rozmowy z gminą jako argument. Użytkownik nie ma jednak
+   oglądać czerwonego błędu w trakcie wpisywania: dopóki źródła nie ma, stawka
+   po prostu nie jedzie do obliczeń, a pole źródła prosi o uzupełnienie. */
+function stawkaGotowa(){
+  const stawka = document.getElementById("p-rynek.czynsz_rynkowy_m2_mies");
+  const zrodlo = document.getElementById("p-rynek.zrodlo");
+  if (!stawka || !zrodlo) return true;
+  const brakuje = stawka.value !== "" && zrodlo.value.trim() === "";
+  const pole = zrodlo.closest(".polex");
+  let nota = pole.querySelector(".prosba");
+  if (brakuje){
+    delete zmiany["rynek.czynsz_rynkowy_m2_mies"];
+    zrodlo.setAttribute("aria-invalid", "true");
+    if (!nota){
+      nota = document.createElement("div");
+      nota.className = "prosba";
+      nota.textContent = "Podaj źródło, żeby stawka weszła do obliczeń. "
+        + "Bez niego nikt później nie odtworzy, skąd ta liczba.";
+      pole.appendChild(nota);
+    }
+  } else {
+    // Źródło jest — stawka wraca do zestawu zmian. Bez tego zostałaby usunięta
+    // przy pierwszym wpisaniu i nigdy nie wróciła do obliczeń.
+    if (stawka.value !== "") zmiany["rynek.czynsz_rynkowy_m2_mies"] = Number(stawka.value);
+    zrodlo.removeAttribute("aria-invalid");
+    if (nota) nota.remove();
+  }
+  return !brakuje;
 }
 
 /* ================= wybór gruntu =================

@@ -7,6 +7,7 @@ naprawde widzi, a nie to, co jest w zrodle strony.
 import json
 import re
 import threading
+import urllib.error
 import urllib.request
 from decimal import Decimal as D
 from http.server import ThreadingHTTPServer
@@ -395,3 +396,111 @@ class TestGrunt_WarstwaInterakcji:
         assert p.locator("#porownanie-warianty .wariant").count() == 5
         assert p.locator("#porownanie-wnioski .wniosek").count() >= 1
         assert bledy == [], bledy[:3]
+
+
+# ---------------------------------------------------------------------------
+# 9. Czynsz rynkowy — errata nr 1. Trzeci sufit, dwa wiersze wykresu i pytanie
+#    w miejsce brakujacej danej.
+# ---------------------------------------------------------------------------
+
+RYNEK_ZMIANY = {
+    "rynek.czynsz_rynkowy_m2_mies": 26.0,
+    "rynek.zrodlo": "mediana z 15 ofert 40-55 m2, portal ogloszeniowy",
+}
+
+
+class TestRynek_WarstwaInterakcji:
+    def test_wykres_ma_wiersz_na_kazda_aktywna_pule(self, adres):
+        w = wolaj(adres, "/api/przelicz", {"zmiany": {}})
+        assert [r["pula"] for r in w["wykresy"]["czynsz_poziomy"]["wiersze"]] == [
+            "spoleczna", "komunalna"
+        ]
+
+    def test_wiersz_komunalny_nie_ma_linii_rynkowej(self, adres):
+        w = wolaj(adres, "/api/przelicz", {"zmiany": RYNEK_ZMIANY})
+        kom = next(
+            r for r in w["wykresy"]["czynsz_poziomy"]["wiersze"] if r["pula"] == "komunalna"
+        )
+        assert kom["rynkowy"] is None
+
+    def test_bez_stawki_jest_pytanie_a_nie_liczba(self, adres):
+        c = wolaj(adres, "/api/przelicz", {"zmiany": {}})["wykresy"]["czynsz_poziomy"]
+        assert c["rynek_podano"] is False
+        assert c["pytanie"].endswith("albo wyższa dotacja.")
+        spol = next(r for r in c["wiersze"] if r["pula"] == "spoleczna")
+        assert spol["rynkowy"] is None
+
+    def test_stawka_bez_zrodla_jest_odrzucana(self, adres):
+        with pytest.raises(urllib.error.HTTPError) as blad:
+            wolaj(adres, "/api/przelicz",
+                  {"zmiany": {"rynek.czynsz_rynkowy_m2_mies": 26.0}})
+        assert blad.value.code == 400
+
+    def test_pola_rynku_sa_edytowalne_w_interfejsie(self, adres):
+        w = wolaj(adres, "/api/przelicz", {"zmiany": {}})
+        klucze = {p["klucz"] for p in w["zakresy"]["pola_liczbowe"]}
+        assert "rynek.czynsz_rynkowy_m2_mies" in klucze
+        assert "rynek.zrodlo" in klucze
+
+    def test_stawka_rynkowa_nie_jest_suwakiem(self, adres):
+        # To obserwacja, nie dzwignia — rozdz. 3.1 erraty.
+        w = wolaj(adres, "/api/przelicz", {"zmiany": {}})
+        assert not [
+            s for s in w["zakresy"]["suwaki"] if s["klucz"].startswith("rynek.")
+        ]
+
+    def test_lokalizacja_jest_oznaczona_jako_wylacznie_opisowa(self, adres):
+        w = wolaj(adres, "/api/przelicz", {"zmiany": {}})
+        lok = w["zakresy"]["lokalizacja"]
+        assert lok["gmina"] and lok["wojewodztwo"]
+        assert "wyłącznie do opisu" in lok["podpis"]
+
+    def test_sweep_niesie_oba_punkty_graniczne(self, adres):
+        w = wolaj(adres, "/api/sweep", {"zmiany": {}})
+        assert "punkt_graniczny" in w
+        assert "punkt_graniczny_rynkowy" in w
+        assert w["punkt_graniczny_rynkowy"] is None
+
+    def test_zdania_o_czynszu_nie_niosa_numerow_artykulow(self, adres):
+        for zmiany in ({}, RYNEK_ZMIANY,
+                       {**RYNEK_ZMIANY, "powierzchnie.udzial_puli_komunalnej": 0.6}):
+            c = wolaj(adres, "/api/przelicz", {"zmiany": zmiany})["wykresy"]["czynsz_poziomy"]
+            for klucz in ("zdanie", "pytanie", "ocena_rynkowa"):
+                assert not ARTYKUL.search(c[klucz] or ""), c[klucz]
+
+    @pytest.mark.wolne
+    def test_przegladarka_rysuje_dwa_wiersze_i_pytanie(self, strona):
+        p, bledy = strona
+        # inner_text na elementach SVG bywa puste — czytamy textContent.
+        etykiety = p.evaluate(
+            "() => Array.from(document.querySelectorAll('#w-czynsz text'))"
+            ".map(e => e.textContent)"
+        )
+        assert any("społeczne" in e for e in etykiety)
+        assert any("komunalne" in e for e in etykiety)
+        # Fixture `strona` jest wspoldzielona, wiec poprzednie testy mogly zmienic
+        # wariant. Niezmiennik jest jeden: dopoki stawki rynkowej nie podano,
+        # w miejscu trzeciego sufitu stoi pytanie, a nie liczba. Konkretne
+        # brzmienie sprawdza test na poziomie API.
+        pytanie = p.locator("#p-czynsz .pytanie").inner_text().strip()
+        assert pytanie
+        assert not re.search(r"\d+,\d+ zł za metr\.$", pytanie) or "?" in pytanie
+        assert bledy == [], bledy[:3]
+
+    @pytest.mark.wolne
+    def test_stawka_bez_zrodla_prosi_zamiast_wyrzucac_blad(self, strona):
+        p, bledy = strona
+        p.fill("#p-rynek\\.czynsz_rynkowy_m2_mies", "26")
+        p.dispatch_event("#p-rynek\\.czynsz_rynkowy_m2_mies", "change")
+        p.wait_for_timeout(1200)
+        assert p.locator("#blad").is_visible() is False
+        assert p.locator(".prosba").count() == 1
+
+        p.fill("#p-rynek\\.zrodlo", "mediana z 15 ofert 40-55 m2")
+        p.dispatch_event("#p-rynek\\.zrodlo", "change")
+        p.wait_for_selector("#p-czynsz", timeout=30000)
+        p.wait_for_timeout(3000)
+        assert p.locator(".prosba").count() == 0
+        assert "rynek" in p.evaluate(
+            "() => document.querySelector('#w-czynsz').textContent"
+        )

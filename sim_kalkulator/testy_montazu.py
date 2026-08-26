@@ -221,15 +221,22 @@ def test_zdolnosci_czynszowej(
                 f"({limity.limit_wiazacy_zrodlo}). Montazu nie da sie domknac samym czynszem."
             )
 
-    for limity, czynsz_rynkowy in (
-        (limity_spoleczna, w.pula_spoleczna.czynsz_rynkowy_m2_mies),
-    ):
-        if czynsz_rynkowy is not None:
-            szczegoly["Czynsz rynkowy — pula spoleczna"] = f"{czynsz_rynkowy:.2f} zl/m2/mies."
-            szczegoly["Dyskonto do rynku — pula spoleczna"] = (
-                f"{(JEDEN - limity.limit_wiazacy_m2_mies / czynsz_rynkowy):.1%} "
-                "ponizej stawki rynkowej wynosi limit ustawowy"
-            )
+    # Trzeci sufit — poziom akceptowany przez rynek. Dotyczy WYLACZNIE puli
+    # spolecznej: w komunalnej najemca jest gmina, a oplaty podnajemcow sa
+    # ustawione na poziomie zasobu komunalnego, wiec rynek najmu ich nie dotyczy.
+    czynsz_rynkowy = w.rynek.czynsz_rynkowy_m2_mies
+    if czynsz_rynkowy is not None:
+        szczegoly["Czynsz rynkowy — pula spoleczna"] = (
+            f"{czynsz_rynkowy:.2f} zl/m2/mies. ({w.rynek.zrodlo})"
+        )
+        szczegoly["Dyskonto do rynku — pula spoleczna"] = (
+            f"{(JEDEN - limity_spoleczna.limit_wiazacy_m2_mies / czynsz_rynkowy):.1%} "
+            "ponizej stawki rynkowej wynosi limit ustawowy"
+        )
+    else:
+        szczegoly["Czynsz rynkowy — pula spoleczna"] = (
+            "nie podano — sufit rynkowy pozostaje nieznany"
+        )
 
     if not naruszenia:
         najslabsza = min(
