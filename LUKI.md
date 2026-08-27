@@ -355,3 +355,104 @@ komunalnym, z **priorytetem niskim** i wskazówką „wdrożyć po uruchomieniu
 mechanizmu dla puli społecznej — bez sygnału z negocjacji nie wiadomo, czy
 parametr jest w praktyce potrzebny". Zgodnie z tym nie został wdrożony.
 Konstrukcja jest identyczna jak dla stawki rynkowej, więc dołożenie będzie proste.
+
+---
+
+## 13. Baza naliczania dotacji — grunt w podstawie czy poza nią
+
+**Kwestia otwarta, nierozstrzygnięta. Implementacja przyjmuje jeden odczyt i go
+oznacza; wymaga potwierdzenia w BGK.**
+
+Model liczy dotację od kosztów przedsięwzięcia **zawierających wartość gruntu**.
+Na scenariuszu odniesienia (PUM 3000 m², grunt 2,8 mln zł, udział komunalny 30%)
+daje to bazę 29,05 mln zł i dotację 16,05 mln zł. Odczyt alternatywny — baza bez
+gruntu, przy zachowaniu gruntu jako limitu części ponad próg gruntowy — dałby
+dotację o **1,48 mln zł niższą**.
+
+### 13.1. Skąd wziął się przyjęty odczyt
+
+Nie z przepisu i nie z osobnego rozstrzygnięcia przy implementacji, tylko
+z katalogu kosztów w specyfikacji: rozdz. 8 wymienia grunt wśród kosztów
+wspólnych dzielonych kluczem PUM, a tożsamość domykająca montaż brzmi
+`grant + kredyt + partycypacja + wkład_własny = koszty_przedsięwzięcia`.
+Specyfikacja posługuje się nazwą `koszty_kwalifikowane`, ale nigdzie jej nie
+definiuje — a testy odbiorcze nie rozstrzygają, bo sprawdzają wariant bez gruntu
+inwestora, w którym obie bazy są identyczne.
+
+Innymi słowy: implementacja poszła za katalogiem kosztów, a niejednoznaczność
+nie została wtedy odnotowana. To jest luka w tym dokumencie, którą trzeba było
+opisać przy etapie 3.
+
+### 13.2. Argument za odczytem przeciwnym
+
+Formularz rozliczenia z rozp. Dz.U. 2025 poz. 1897 wykazuje osobno „faktyczny
+koszt przedsięwzięcia" i osobno „wartość gruntu stanowiącego własność inwestora",
+a w strukturze finansowania zalicza wartość gruntu do środków własnych inwestora.
+Czyta się to tak, że grunt jest **wkładem i limitem pasma ponad próg gruntowy**,
+a nie pozycją bazy.
+
+Uwaga metodyczna: to argument z formularza, nie z brzmienia przepisu — a formularz
+może odzwierciedlać sposób wykazywania, nie definicję podstawy. Rozstrzygnięcia
+nie da się oprzeć na samym układzie rubryk.
+
+### 13.3. Napięcie wewnątrz odczytu przeciwnego
+
+Gdyby grunt wypadł z bazy, tożsamość domykająca montaż przestałaby się zgadzać:
+działkę trzeba sfinansować, więc pozostaje po stronie kosztów, choć dotacja jej
+nie obejmuje. To samo w sobie nie jest sprzeczne — znaczy tylko, że grunt pokrywa
+inwestor — ale wymaga rozdzielenia „kosztów przedsięwzięcia" na potrzeby dotacji
+i na potrzeby montażu. Model dziś tego rozdziału nie ma.
+
+**Do rozstrzygnięcia w BGK przed użyciem wyniku w rozmowie o finansowaniu.**
+Wynik niesie ostrzeżenie `ZALOZENIE_GRUNT_W_BAZIE_DOTACJI` z kwotą różnicy.
+
+---
+
+## 14. Nadwyżka rekompensaty — okres, do którego odnosi się próg
+
+Próg tolerancji (10% w ścieżce grantowej, 20% w kredytowej) odnosi się do
+**średniej rocznej** rekompensaty. RUOIG i koszty netto są wielkościami całego
+okresu powierzenia, więc nadwyżka też jest wieloletnia.
+
+Poprzednia wersja porównywała nadwyżkę z 25–30 lat z progiem opartym na jednym
+roku, co zawyżało wskaźnik dwudziestopięcio- do trzydziestokrotnie: na scenariuszu
+odniesienia banner podawał „378% średniej rocznej" przy przekroczeniu limitu
+o 14,4%. Po naprawie wskaźnik wynosi 12,6%.
+
+Werdykt w tym scenariuszu się nie zmienił — pula komunalna ma 12,5% przy progu
+10% i nadal nie przechodzi — ale przy nadwyżce granicznej poprzednia wersja
+dawała fałszywy alarm.
+
+**Kwestia otwarta:** przepis odnosi próg do **okresu rozliczeniowego**, a model
+nie odwzorowuje jego długości — liczy jeden strumień dla całego okresu
+powierzenia. Annualizacja jest przybliżeniem: gdyby nadwyżka rozłożyła się
+nierówno, w pojedynczym okresie rozliczeniowym mogłaby przekroczyć próg mimo
+poprawnego wyniku w skali całego okresu. Wynik niesie ostrzeżenie
+`ZALOZENIE_OKRES_ROZLICZENIOWY_NADWYZKI`.
+
+---
+
+## 15. Podział udziałów przy aporcie gminy
+
+Aport gminy nie jest tylko pozycją finansowania — za wniesiony grunt gmina
+obejmuje udziały. O proporcji nie decyduje niczyja wola, tylko relacja wartości
+działki do kapitału, który musi wyłożyć inwestor.
+
+Na scenariuszu odniesienia gmina wnosi 2,8 mln zł przy 903 tys. zł od inwestora,
+czyli obejmuje **75,6% kapitału spółki** — większość na zgromadzeniu wspólników,
+z prawem decydowania między innymi o stawkach czynszu. Komunikat „gmina obejmie
+udziały i stanie się wspólnikiem" był prawdziwy, ale nie oddawał skali.
+
+**Uproszczenia przyjęte w tym wyliczeniu:**
+
+- kapitał spółki utożsamiony jest z wkładem domykającym montaż (gotówka inwestora
+  plus wkłady rzeczowe). Realna umowa spółki może część aportu odnieść na agio,
+  a wtedy udział będzie inny;
+- aport wyceniony jest wartością z operatu. Wycena na potrzeby objęcia udziałów
+  bywa niższa;
+- model nie zna umowy spółki, więc nie uwzględnia uprzywilejowania udziałów ani
+  progów kwalifikowanych. Próg 50% to zwykła większość z prawa spółek, nie
+  z ustaw o wsparciu mieszkalnictwa.
+
+Wynik traktować jako **rząd wielkości i sygnał ostrzegawczy**, nie jako ustalenie
+korporacyjne.

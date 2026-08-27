@@ -251,13 +251,19 @@ class TestProgNadwyzki:
     """Prog tolerancji: 10% sredniej rocznej rekompensaty w grancie, 20% w kredycie."""
 
     def zbuduj_pule(self, sciezka, nadwyzka_wzgledna):
+        """Pula, ktorej nadwyzka ROCZNA stanowi zadany ulamek sredniej rocznej.
+
+        RUOIG i koszty netto sa wielkosciami calego okresu powierzenia, wiec
+        nadwyzka tez. Zeby jej czesc przypadajaca na rok wyniosla `x` sredniej
+        rocznej, cala nadwyzka musi byc `lat` razy wieksza.
+        """
         from sim_kalkulator import prawo
         from sim_kalkulator.rekompensata import RekompensataPuli
 
         lat = 25
         ruoig = D("2500000")
         srednia = ruoig / D(lat)
-        nadwyzka = srednia * D(str(nadwyzka_wzgledna))
+        nadwyzka = srednia * D(str(nadwyzka_wzgledna)) * D(lat)
         return RekompensataPuli(
             nazwa="test",
             sciezka=sciezka,
@@ -294,6 +300,24 @@ class TestProgNadwyzki:
     def test_ta_sama_nadwyzka_przechodzi_w_kredycie_a_nie_w_grancie(self):
         assert self.zbuduj_pule("kredyt", "0.15").przechodzi is True
         assert self.zbuduj_pule("grant", "0.15").przechodzi is False
+
+    def test_nadwyzka_wieloletnia_jest_annualizowana_przed_porownaniem(self):
+        # Prog odnosi sie do SREDNIEJ ROCZNEJ rekompensaty, a nadwyzka powstaje
+        # w calym okresie powierzenia. Porownanie sumy z 25 lat z progiem opartym
+        # na jednym roku zawyzalo wskaznik dwudziestopieciokrotnie.
+        pula = self.zbuduj_pule("grant", "0.08")
+        assert pula.nadwyzka_roczna == pytest.approx(
+            pula.nadwyzka / D(pula.okres_powierzenia_lat)
+        )
+        assert pula.nadwyzka_wzgledna == pytest.approx(D("0.08"))
+        assert pula.przechodzi is True
+
+    def test_zwrotowi_podlega_nadwyzka_calego_okresu_nie_roczna(self):
+        # Annualizacja sluzy wylacznie porownaniu z progiem — zwraca sie calosc.
+        pula = self.zbuduj_pule("grant", "0.30")
+        assert pula.przechodzi is False
+        assert pula.kwota_do_zwrotu == pula.nadwyzka
+        assert pula.kwota_do_zwrotu > pula.nadwyzka_roczna
 
 
 class TestRozsadnyZysk:

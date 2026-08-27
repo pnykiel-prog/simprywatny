@@ -40,6 +40,7 @@ class WariantGruntu:
     oplata_roczna: Decimal = ZERO
     domyka_sie: bool = False
     gmina_wspolnikiem: bool = False
+    udzial_gminy_w_spolce: Optional[Decimal] = None
     pasmo_45: bool = True
 
 
@@ -151,6 +152,7 @@ def buduj(w: Wejscie) -> PorownanieForm:
                 oplata_roczna=wynik.grunt.oplata_roczna,
                 domyka_sie=wynik.domyka_sie,
                 gmina_wspolnikiem=wynik.grunt.gmina_wspolnikiem,
+                udzial_gminy_w_spolce=wynik.finansowanie.udzial_gminy_w_spolce,
                 pasmo_45=wynik.granty.spoleczna.pasmo_45,
             )
         )
@@ -314,7 +316,11 @@ def _wniosek_najtanszy(wybrana: str, indeks: Dict[str, WariantGruntu]) -> List[W
     if not najtanszy.pasmo_45:
         tresc += " Ale ścina dotację — sprawdź, czy bilans wychodzi na plus."
     elif najtanszy.gmina_wspolnikiem:
-        tresc += " Ale gmina obejmuje wtedy udziały w spółce."
+        tresc += (
+            f" Ale gmina obejmuje wtedy {najtanszy.udzial_gminy_w_spolce:.0%} udziałów w spółce."
+            if najtanszy.udzial_gminy_w_spolce is not None
+            else " Ale gmina obejmuje wtedy udziały w spółce."
+        )
     elif najtanszy.oplata_roczna > ZERO:
         tresc += (
             f" Kosztem jest opłata roczna {_zl(najtanszy.oplata_roczna)} przez cały okres."

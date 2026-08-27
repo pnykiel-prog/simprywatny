@@ -204,6 +204,35 @@ def build(w: Wejscie, a: Alokacja) -> Granty:
             )
             )
 
+    # Kwestia otwarta: czy wartosc gruntu wchodzi do bazy naliczania dotacji.
+    # Model przyjmuje, ze TAK — specyfikacja wymienia grunt wsrod kosztow wspolnych
+    # dzielonych kluczem PUM i domyka montaz wzgledem kosztow przedsiewziecia
+    # zawierajacych te pozycje. Przepis mowi o "kosztach przedsiewziecia", nie
+    # definiujac ich katalogu, a formularz rozliczenia wykazuje koszt przedsiewziecia
+    # i wartosc gruntu w osobnych pozycjach — co czyta sie tez odwrotnie.
+    # To ZALOZENIE, nie rozstrzygniecie. Patrz LUKI.md, rozdz. 13.
+    grunt_w_bazie = a.spoleczna.grunt_w_podstawie + a.komunalna.grunt_w_podstawie
+    if grunt_w_bazie > ZERO:
+        roznica = _roznica_bazy_bez_gruntu(w, a, spoleczna, komunalna)
+        ostrzezenia.append(
+            Ostrzezenie(
+                kod="ZALOZENIE_GRUNT_W_BAZIE_DOTACJI",
+                tresc=(
+                    f"Wartosc gruntu ({grunt_w_bazie:.2f} zl) wchodzi do bazy naliczania "
+                    "dotacji w obu pulach. Odczyt alternatywny — baza liczona bez gruntu, "
+                    "przy zachowaniu gruntu jako limitu pasma ponad prog gruntowy — daje "
+                    f"dotacje nizsza o {roznica:.2f} zl. ZALOZENIE do potwierdzenia w BGK."
+                ),
+                podstawa="art. 13 ust. 1 pkt 1 ustawy z 8.12.2006",
+                tresc_potoczna=(
+                    f"Dotacja liczona jest od kosztów zawierających wartość działki. Przy odczycie "
+                    f"przeciwnym byłaby o {_zl(roznica)} niższa. To założenie — potwierdź w Banku, "
+                    "bo zmienia wynik."
+                ),
+                waga=Waga.ZMIENIA_KWOTE,
+            )
+        )
+
     if a.spoleczna.aktywna and spoleczna.utracony_przez_forme_gruntu:
         ostrzezenia.append(
             Ostrzezenie(
@@ -250,6 +279,30 @@ def build(w: Wejscie, a: Alokacja) -> Granty:
         ograniczony_limitem_hybrydy=ograniczony_hybryda,
         ostrzezenia=tuple(ostrzezenia),
     )
+
+
+def _roznica_bazy_bez_gruntu(
+    w: Wejscie, a: Alokacja, spoleczna: GrantPuli, komunalna: GrantPuli
+) -> Decimal:
+    """O ile nizsza bylaby dotacja, gdyby baze liczyc bez wartosci gruntu.
+
+    Odczyt alternatywny zostawia grunt tam, gdzie przepis mowi o nim wprost —
+    jako limit czesci ponad prog gruntowy — ale wyjmuje go z samej podstawy.
+    Liczone wylacznie do komunikatu; implementacja pozostaje bez zmian.
+    """
+    roznica = ZERO
+    if a.spoleczna.aktywna:
+        bez = a.spoleczna.koszty_przedsiewziecia - a.spoleczna.grunt_w_podstawie
+        alternatywny = min(
+            bez * spoleczna.stawka_nominalna,
+            bez * prawo.GRANT_SPOLECZNY_PROG_GRUNTOWY
+            + (a.spoleczna.grunt_do_pasma_w_podstawie if spoleczna.pasmo_45 else ZERO),
+        )
+        roznica += spoleczna.kwota - alternatywny
+    if a.komunalna.aktywna:
+        bez = a.komunalna.koszty_przedsiewziecia - a.komunalna.grunt_w_podstawie
+        roznica += komunalna.kwota - bez * komunalna.stawka_nominalna
+    return max(ZERO, roznica)
 
 
 def _zl(kwota: Decimal) -> str:

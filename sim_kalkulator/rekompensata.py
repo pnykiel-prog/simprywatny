@@ -114,18 +114,37 @@ class RekompensataPuli:
         return self.ruoig / Decimal(self.okres_powierzenia_lat)
 
     @property
+    def nadwyzka_roczna(self) -> Decimal:
+        """Nadwyzka sprowadzona do jednego roku okresu powierzenia.
+
+        RUOIG i koszty netto liczone sa dla calego okresu powierzenia, wiec
+        nadwyzka tez jest wielkoscia wieloletnia. Prog tolerancji odnosi sie do
+        SREDNIEJ ROCZNEJ rekompensaty, wiec zeby porownywac wielkosci tego samego
+        rzedu, nadwyzka musi zostac zannualizowana. Porownanie sumy z 25 lat
+        z progiem opartym na jednym roku zawyzalo wynik dwudziestopieciokrotnie.
+        """
+        if self.okres_powierzenia_lat <= 0:
+            return ZERO
+        return self.nadwyzka / Decimal(self.okres_powierzenia_lat)
+
+    @property
     def tolerancja_kwotowo(self) -> Decimal:
         """Prog tolerancji jako procent sredniej rocznej rekompensaty."""
         return self.srednia_roczna_rekompensata * self.prog_tolerancji
 
     @property
     def nadwyzka_wzgledna(self) -> Decimal:
-        """Nadwyzka odniesiona do sredniej rocznej rekompensaty."""
-        return bezpieczny_iloraz(self.nadwyzka, self.srednia_roczna_rekompensata)
+        """Nadwyzka roczna odniesiona do sredniej rocznej rekompensaty.
+
+        Oba skladniki dotycza jednego roku, wiec iloraz jest porownywalny wprost
+        z progiem tolerancji. Rownowaznie: nadwyzka calego okresu odniesiona do
+        rekompensaty calego okresu — okres skraca sie po obu stronach.
+        """
+        return bezpieczny_iloraz(self.nadwyzka_roczna, self.srednia_roczna_rekompensata)
 
     @property
     def przechodzi(self) -> bool:
-        return self.nadwyzka <= self.tolerancja_kwotowo
+        return self.nadwyzka_roczna <= self.tolerancja_kwotowo
 
     @property
     def kwota_do_zwrotu(self) -> Decimal:
@@ -133,6 +152,8 @@ class RekompensataPuli:
 
         Przekroczenie progu tolerancji uruchamia zwrot calej nadwyzki, a nie tylko
         czesci ponad prog — prog jest granica dopuszczalnosci, nie kwota wolna.
+        Zwrotowi podlega nadwyzka CALEGO okresu, nie jej roczna czesc; annualizacja
+        sluzy wylacznie porownaniu z progiem.
         """
         return self.nadwyzka if not self.przechodzi else ZERO
 
@@ -423,6 +444,31 @@ def build(
                     "domyślnym były to dwa osobne rachunki o różnych progach."
                 ),
                 waga=Waga.ZMIENIA_WERDYKT,
+            )
+        )
+
+    for pula in (spoleczna, komunalna):
+        if pula is None or pula.nadwyzka <= ZERO:
+            continue
+        ostrzezenia.append(
+            Ostrzezenie(
+                kod="ZALOZENIE_OKRES_ROZLICZENIOWY_NADWYZKI",
+                tresc=(
+                    f"Nadwyzka puli {pula.nazwa} ({pula.nadwyzka:.2f} zl) powstaje w calym "
+                    f"{pula.okres_powierzenia_lat}-letnim okresie powierzenia i zostala "
+                    f"sprowadzona do jednego roku ({pula.nadwyzka_roczna:.2f} zl), zeby "
+                    f"porownac ja z progiem {pula.prog_tolerancji:.0%} sredniej rocznej "
+                    "rekompensaty. Przepis odnosi prog do okresu rozliczeniowego, a model "
+                    "nie odwzorowuje jego dlugosci — annualizacja jest przyblizeniem. "
+                    "Gdyby okres rozliczeniowy byl krotszy niz okres powierzenia, nadwyzka "
+                    "moglaby rozlozyc sie nierowno i przekroczyc prog w pojedynczym okresie."
+                ),
+                podstawa="§ 7 ust. 9 rozp. Dz.U. 2025 poz. 1897; § 13 ust. 8 rozp. t.j. Dz.U. 2021 poz. 766",
+                tresc_potoczna=(
+                    "Nadwyżka rozłożona jest na cały okres umowy. Bank rozlicza ją w krótszych "
+                    "okresach, więc w pojedynczym rozliczeniu może wypaść wyżej niż tu."
+                ),
+                waga=Waga.ZMIENIA_KWOTE,
             )
         )
 

@@ -30,6 +30,10 @@ from .silnik import Wynik, przelicz
 from . import porownanie as _porownanie
 from .waluta import ZERO, bezpieczny_iloraz, zl
 
+# Jak blisko progu z tabeli art. 7c trzeba byc, zeby skok limitu byl informacja
+# decyzyjna. To wybor prezentacyjny, nie prog ustawowy.
+PROG_BLISKOSCI_7C = Decimal("0.05")
+
 SCIEZKA_PARAMETRU = re.compile(r"[a-z_]+(\.[a-z_0-9]+)*")
 
 
@@ -327,6 +331,7 @@ def _wiersz_czynszu(
     faktyczny, czyli poziom akceptowany przez rynek. Wiaze nizszy z nich.
     """
     sufity = [(limity.limit_wiazacy_m2_mies, "prawny")]
+    sasiedni = _sasiedni_prog_7c(limity)
     if rynkowy is not None:
         sufity.append((rynkowy, "rynkowy"))
     najnizszy, rodzaj = min(sufity, key=lambda para: para[0])
@@ -346,6 +351,44 @@ def _wiersz_czynszu(
         "sufit_najnizszy": _liczba(najnizszy),
         "sufit_rodzaj": rodzaj,
         "miesci_sie": miesci,
+        "prog_sasiedni": sasiedni,
+    }
+
+
+def _sasiedni_prog_7c(limity) -> Optional[Dict[str, Any]]:
+    """Najblizszy prog z tabeli art. 7c i limit czynszu po jego przekroczeniu.
+
+    Tabela dziala skokowo: przy udziale wsparcia 44,9% limit wynosi 4,0% wartosci
+    odtworzeniowej rocznie, przy 45,0% juz 3,5%. Roznica kilkunastu procent stawki
+    czynszu bierze sie z jednej dziesiatej punktu procentowego dotacji, a przy
+    udziale blisko progu jest to informacja decyzyjna — inaczej niewidoczna.
+
+    Zwraca None, gdy udzial wsparcia nie jest blisko zadnego progu.
+    """
+    udzial = limity.udzial_wsparcia
+    if udzial is None or limity.podstawa_wiazaca_m2 <= ZERO:
+        return None
+    kandydaci = [
+        prog for prog, _ in prawo.LIMIT_CZYNSZU_ART_7C
+        if prog > udzial and prog - udzial <= PROG_BLISKOSCI_7C
+    ]
+    if not kandydaci:
+        return None
+    prog = min(kandydaci)
+    stawka = prawo.limit_czynszu_art_7c(prog)
+    limit_po = limity.podstawa_wiazaca_m2 * stawka / Decimal(12)
+    if limit_po >= limity.limit_wiazacy_m2_mies:
+        return None
+    return {
+        "udzial_progu": _liczba(prog),
+        "brakuje_pp": _liczba((prog - udzial) * Decimal(100)),
+        "limit_po_progu": _liczba(limit_po),
+        "opis": (
+            f"Przy dotacji {prog:.0%} kosztów limit czynszu spada z "
+            f"{_dziesietnie(limity.limit_wiazacy_m2_mies)} zł do "
+            f"{_dziesietnie(limit_po)} zł. Dzieli Cię od tego "
+            f"{_dziesietnie((prog - udzial) * Decimal(100), 1)} punktu procentowego dotacji."
+        ),
     }
 
 
@@ -503,8 +546,22 @@ def _zapas_rekompensaty(r: Wynik) -> Dict[str, Any]:
             f"Pomoc publiczna przekracza dopuszczalny limit o "
             f"{_kwota_slownie(r.rekompensata.kwota_do_zwrotu)}. Tę kwotę trzeba będzie zwrócić."
         )
+    # "114% dopuszczalnej pomocy" czyta sie jak wskaznik pokrycia finansowania —
+    # sugeruje nadmiar srodkow, a oznacza przekroczenie limitu. Podajemy wiec
+    # osobno zapas (gdy miesci sie) i przekroczenie (gdy nie), a skala konczy
+    # sie na limicie zamiast miec go posrodku.
+    przekroczenie = max(ZERO, (wykorzystanie or ZERO) - Decimal(1))
+    zapas = max(ZERO, Decimal(1) - (wykorzystanie or ZERO))
     return {
         "wykorzystanie": _liczba(wykorzystanie),
+        "przekroczenie": _liczba(przekroczenie),
+        "zapas": _liczba(zapas),
+        "etykieta": (
+            f"Przekroczenie limitu o {przekroczenie:.0%}"
+            if przekroczenie > ZERO
+            else f"Zapas do limitu {zapas:.0%}"
+        ),
+        "liczba_glowna": _liczba(przekroczenie if przekroczenie > ZERO else zapas),
         "pula": najciasniej.nazwa,
         "przechodzi": r.rekompensata.przechodzi,
         "do_zwrotu": _liczba(r.rekompensata.kwota_do_zwrotu),
@@ -700,11 +757,31 @@ def _grunt_json(r: Wynik) -> Dict[str, Any]:
         "wklad_rzeczowy": _liczba(u.wklad_rzeczowy_laczny),
         "oplata_roczna": _liczba(u.oplata_roczna),
         "gmina_wspolnikiem": u.gmina_wspolnikiem,
+        # Skutek ustrojowy wyrazony w procentach kapitalu — sam komunikat
+        # "gmina stanie sie wspolnikiem" nie oddaje skali.
+        "udzial_gminy_w_spolce": _liczba(r.finansowanie.udzial_gminy_w_spolce),
+        "gmina_ma_wiekszosc": (
+            r.finansowanie.udzial_gminy_w_spolce is not None
+            and r.finansowanie.udzial_gminy_w_spolce > prawo.WIEKSZOSC_UDZIALOW
+        ),
+        "kapital_gminy": _liczba(r.finansowanie.kapital_gminy),
+        "kapital_inwestora": _liczba(r.finansowanie.kapital_inwestora_w_spolce),
         "pum_dla_gminy": _liczba(u.pum_dla_gminy),
         "grant_utracony": _liczba(r.granty.spoleczna.grant_utracony),
         "utracony_przez_forme": r.granty.spoleczna.utracony_przez_forme_gruntu,
         "opis": u.opis_kanalow,
     }
+    if u.gmina_wspolnikiem and r.finansowanie.udzial_gminy_w_spolce is not None:
+        udzial = r.finansowanie.udzial_gminy_w_spolce
+        zdanie = f"Gmina obejmuje {udzial:.0%} udziałów w spółce."
+        if udzial > prawo.WIEKSZOSC_UDZIALOW:
+            zdanie += (
+                " Ma większość na zgromadzeniu wspólników i decyduje o stawkach czynszu."
+            )
+        else:
+            zdanie += " Kontrola nad spółką zostaje po Twojej stronie."
+        opisy.append(zdanie)
+
     if u.rozliczany_lokalami:
         biezace["koszt_metra_oddanych_lokali"] = _liczba(
             w.grunt.koszt_lokali_dla_gminy_na_m2
@@ -739,7 +816,11 @@ def _uwagi_wariantu(w) -> list:
             f"dotacja ścięta do {prawo.GRANT_SPOLECZNY_PROG_GRUNTOWY:.0%} kosztów"
         )
     if w.gmina_wspolnikiem:
-        uwagi.append("gmina wspólnikiem spółki")
+        uwagi.append(
+            f"gmina obejmuje {w.udzial_gminy_w_spolce:.0%} udziałów"
+            if w.udzial_gminy_w_spolce is not None
+            else "gmina wspólnikiem spółki"
+        )
     if w.oplata_roczna > ZERO:
         uwagi.append(f"opłata {_kwota_slownie(w.oplata_roczna)} rocznie")
     if not w.domyka_sie:
@@ -768,6 +849,7 @@ def porownanie_json(r: Wynik) -> Dict[str, Any]:
                 "oplata_roczna": _liczba(w.oplata_roczna),
                 "domyka_sie": w.domyka_sie,
                 "gmina_wspolnikiem": w.gmina_wspolnikiem,
+                "udzial_gminy_w_spolce": _liczba(w.udzial_gminy_w_spolce),
                 "pasmo_45": w.pasmo_45,
                 "uwagi": _uwagi_wariantu(w),
             }
@@ -990,6 +1072,52 @@ def zakresy_json(r: Wynik) -> Dict[str, Any]:
     }
 
 
+def _dzwignia_poza_osia(w, numer: Optional[int]) -> Dict[str, Any]:
+    """Co ruszyc, gdy proporcja mieszkan nie jest dzwignia.
+
+    Wskazuje sekcje interfejsu, a nie ogolna rade — uzytkownik ma wiedziec,
+    gdzie kliknac. Forma gruntu jest tu najczestsza przyczyna, bo dziala na
+    wynik czterema kanalami naraz i zadnego z nich nie widac na osi udzialu pul.
+    """
+    if numer is None:
+        return {}
+    if numer == 3 and w.grunt.forma.skutki.gmina_wspolnikiem:
+        return {
+            "opis": (
+                "Grunt wniesiony przez gminę liczy się jako Twój przychód i obniża limit "
+                "pomocy publicznej niezależnie od proporcji mieszkań."
+            ),
+            "dzialanie": "Zmień formę działki",
+            "cel": "grunt",
+        }
+    if numer == 3:
+        return {
+            "opis": (
+                "Limit pomocy publicznej nie zależy od proporcji mieszkań. Ruszają go "
+                "sposób rozliczenia nakładu, forma gruntu i wysokość dotacji."
+            ),
+            "dzialanie": "Zmień formę działki",
+            "cel": "grunt",
+        }
+    if numer == 2:
+        return {
+            "opis": (
+                "Czynsz nie pokrywa kosztów w żadnym wariancie proporcji. Ruszają to "
+                "stawki czynszu, koszty eksploatacji i warunki kredytu."
+            ),
+            "dzialanie": "Przejdź do dźwigni",
+            "cel": "dzwignie",
+        }
+    return {
+        "opis": (
+            "Kapitału brakuje przy każdej proporcji mieszkań. Ruszają to koszt budowy, "
+            "partycypacja i forma gruntu."
+        ),
+        "dzialanie": "Przejdź do dźwigni",
+        "cel": "dzwignie",
+    }
+
+
 def sweep_json(w) -> Dict[str, Any]:
     analiza = _wrazliwosc.build(w)
     return {
@@ -1005,6 +1133,11 @@ def sweep_json(w) -> Dict[str, Any]:
         "punkt_graniczny_wiazacy": _liczba(analiza.sweep.punkt_graniczny_wiazacy),
         "rodzaj_punktu_wiazacego": analiza.sweep.rodzaj_punktu_wiazacego,
         "test_blokujacy": analiza.sweep.test_blokujacy,
+        # Test oblany w kazdym punkcie osi znaczy, ze przesuwanie tego pokretla
+        # nic nie da. Wykres ma wtedy powiedziec to wprost i wskazac dzwignie,
+        # ktora dziala, zamiast swiecic na czerwono na calej szerokosci.
+        "blokada_niezalezna_od_osi": analiza.sweep.blokada_niezalezna_od_osi,
+        "dzwignia_poza_osia": _dzwignia_poza_osia(w, analiza.sweep.blokada_niezalezna_od_osi),
         "punkty": [
             {
                 "udzial": _liczba(p.udzial),

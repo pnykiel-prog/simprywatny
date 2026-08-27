@@ -35,7 +35,10 @@ class PunktSweepu:
     werdykty: Tuple[bool, bool, bool]          # test 1, 2, 3
     wiazace_ograniczenie: str
     luki: Tuple[Tuple[str, Decimal, str], ...]  # (opis, kwota, jednostka)
-    # Wymagany wklad wlasny w tym punkcie — os pionowa wykresu negocjacyjnego.
+    # Wymagany wklad GOTOWKOWY w tym punkcie — os pionowa wykresu negocjacyjnego.
+    # Ta sama wielkosc, ktora pokazuje kaskada i test kapitalowy: pieniadze, ktore
+    # inwestor musi wylozyc. Grunt wniesiony rzeczowo domyka koszty, nie wymagajac
+    # zlotowki, wiec do tej liczby nie wchodzi.
     wklad_wymagany: Optional[Decimal] = None
     # Czynsz spoleczny domykajacy montaz bez wkladu wlasnego przy tym udziale.
     # Errata nr 1, rozdz. 5.2: wzrost udzialu puli komunalnej wypycha go w gore,
@@ -113,6 +116,23 @@ class Sweep:
         return "kapitalowy"
 
     @property
+    def blokada_niezalezna_od_osi(self) -> Optional[int]:
+        """Numer testu, ktory nie przechodzi w ZADNYM punkcie sweepu.
+
+        Gdy montaz nie domyka sie na calej osi, samo tlo wykresu niczego nie
+        wyjasnia — a przyczyna moze lezec zupelnie gdzie indziej niz proporcja
+        mieszkan. Test oblany niezaleznie od udzialu pul znaczy, ze przesuwanie
+        tego pokretla nic nie da i trzeba szukac dzwigni poza osia.
+        """
+        policzalne = [p for p in self.punkty if p.policzalny]
+        if not policzalne or self.punkty_domykajace:
+            return None
+        for numer in (1, 2, 3):
+            if all(not p.werdykty[numer - 1] for p in policzalne):
+                return numer
+        return None
+
+    @property
     def test_blokujacy(self) -> Optional[int]:
         """Ktory test blokuje, gdy nie domyka sie przy zadnym udziale."""
         if self.punkty_domykajace:
@@ -178,7 +198,7 @@ def _punkt(w: Wejscie, udzial: Decimal) -> PunktSweepu:
             for t in werdykty.wszystkie
             if not t.przechodzi
         ),
-        wklad_wymagany=wynik.finansowanie.wklad_wlasny_wymagany,
+        wklad_wymagany=max(ZERO, wynik.finansowanie.wklad_gotowkowy_wymagany),
         czynsz_domykajacy=domykajacy,
         miesci_sie_w_rynku=miesci,
     )
@@ -489,6 +509,13 @@ class Analiza:
         blokujacy = self.sweep.test_blokujacy
         if blokujacy is None:
             return "Zaden punkt sweepu nie byl policzalny — sprawdz dane wejsciowe."
+        niezalezny = self.sweep.blokada_niezalezna_od_osi
+        if niezalezny is not None:
+            return (
+                f"Montaz nie domyka sie przy zadnym udziale puli komunalnej, bo test "
+                f"{niezalezny} nie przechodzi w calym zakresie. Proporcja mieszkan nie "
+                "jest tu dzwignia — przyczyna lezy poza ta osia."
+            )
         return (
             f"Montaz nie domyka sie przy zadnym udziale puli komunalnej. "
             f"Blokuje test {blokujacy}."

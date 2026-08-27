@@ -116,6 +116,10 @@ details summary{cursor:pointer;font-size:12px;font-weight:600;color:var(--akcent
 .forma[disabled] i{color:var(--zle)}
 .grunt-pola{display:grid;gap:9px;margin-top:10px}
 .grunt-skutki{font-size:11px;color:var(--tekst-3);margin-top:8px;line-height:1.4}
+/* Przekroczenie połowy kapitału jest zmianą ustrojową, nie niuansem. */
+.podswietlony{outline:2px solid var(--akcent);outline-offset:5px;border-radius:5px}
+.alarm{background:var(--pasmo-zle);border-left:4px solid var(--zle);border-radius:0 5px 5px 0;
+  padding:7px 10px;margin-top:7px;font-size:11.5px;line-height:1.4;color:var(--tekst);font-weight:600}
 
 /* ---------- porownanie form gruntu ---------- */
 .porownanie{display:grid;gap:5px;margin-top:4px}
@@ -526,7 +530,38 @@ function rysujNegocjacje(s, biezacyUdzial){
   svg.appendChild(el("text", {x:(L+W-R)/2, y:H-6, "text-anchor":"middle", class:"os"},
     "udział mieszkań komunalnych"));
 
-  $("#p-negocjacja").textContent = s.podsumowanie;
+  const podpisN = $("#p-negocjacja");
+  podpisN.textContent = "";
+  const zd = document.createElement("div");
+  zd.textContent = s.podsumowanie;
+  podpisN.appendChild(zd);
+  // Gdy test blokujący nie zależy od tej osi, samo czerwone tło niczego nie mówi.
+  // Nazywamy przyczynę i prowadzimy do sekcji, w której da się coś zrobić.
+  if (s.blokada_niezalezna_od_osi && s.dzwignia_poza_osia && s.dzwignia_poza_osia.opis){
+    const box = document.createElement("div");
+    box.className = "komunikat pilne";
+    box.style.marginTop = "8px";
+    const tekst = document.createElement("div");
+    tekst.textContent = s.dzwignia_poza_osia.opis;
+    box.appendChild(tekst);
+    const link = document.createElement("button");
+    link.type = "button";
+    link.className = "akcja wtorny";
+    link.style.cssText = "margin-top:7px;padding:5px 11px;font-size:12px";
+    link.textContent = s.dzwignia_poza_osia.dzialanie;
+    link.addEventListener("click", () => {
+      const cel = s.dzwignia_poza_osia.cel === "grunt"
+        ? document.querySelector(".grunt")
+        : document.querySelector("#suwaki");
+      if (cel){
+        cel.scrollIntoView({behavior: "smooth", block: "center"});
+        cel.classList.add("podswietlony");
+        setTimeout(() => cel.classList.remove("podswietlony"), 2200);
+      }
+    });
+    box.appendChild(link);
+    podpisN.appendChild(box);
+  }
 }
 
 /* ================= WYKRES 3 — podłoga i sufity czynszowe =================
@@ -537,7 +572,7 @@ function rysujCzynsz(c){
   const svg = $("#w-czynsz"); czysc(svg);
   const W = 620, L = 150, R = 84, GORA = 16, WYS_W = 62;
   const wiersze = c.wiersze || [];
-  const H = Math.max(120, GORA + wiersze.length * WYS_W + 34);
+  const H = Math.max(120, GORA + wiersze.length * WYS_W + 46);
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
   if (!wiersze.length){
     svg.appendChild(el("text", {x:W/2, y:H/2, "text-anchor":"middle", class:"os"},
@@ -597,6 +632,23 @@ function rysujCzynsz(c){
     svg.appendChild(el("text", {x:xl, y:gora+56, "text-anchor":"middle", class:"os"},
       "limit " + zl2(w.limit)));
 
+    // Skok limitu tuż obok — tabela art. 7c działa progowo, a różnica kilkunastu
+    // procent stawki bierze się z ułamka punktu procentowego dotacji.
+    if (w.prog_sasiedni){
+      const xp = x(w.prog_sasiedni.limit_po_progu);
+      const gp2 = el("g", {});
+      gp2.appendChild(el("line", {x1:xp, y1:gora+2, x2:xp, y2:gora+42,
+        stroke:"var(--uwaga)", "stroke-width":2, "stroke-dasharray":"2 3"}));
+      tytulHover(gp2, w.prog_sasiedni.opis);
+      svg.appendChild(gp2);
+      // Próg sąsiedni bywa tuż obok limitu — wtedy podpis schodzi o wiersz niżej,
+      // żeby obie liczby dały się przeczytać.
+      const blisko = Math.abs(xp - x(w.limit)) < 78;
+      svg.appendChild(el("text", {x:xp, y:gora + (blisko ? 68 : 56), "text-anchor":"middle",
+        class:"os", fill:"var(--uwaga)"},
+        "po progu " + zl2(w.prog_sasiedni.limit_po_progu)));
+    }
+
     // linia przerywana — stawka rynkowa; tylko wiersz społeczny może ją mieć
     if (w.rynkowy != null){
       const xr = x(w.rynkowy);
@@ -626,6 +678,14 @@ function rysujCzynsz(c){
     q.textContent = c.pytanie;
     podpis.appendChild(q);
   }
+  const zProgiem = wiersze.find(w => w.prog_sasiedni);
+  if (zProgiem){
+    const u = document.createElement("div");
+    u.className = "komunikat";
+    u.style.marginTop = "8px";
+    u.textContent = zProgiem.prog_sasiedni.opis;
+    podpis.appendChild(u);
+  }
   if (c.rynek_podano && c.rynek_zrodlo){
     const z = document.createElement("div");
     z.className = "info";
@@ -645,8 +705,10 @@ function rysujGauge(g){
     $("#p-gauge").textContent = g.zdanie || "";
     return;
   }
-  // skala 0..125%, strefa ostrzegawcza powyzej 100%
-  const MAKS = 1.25;
+  // Skala kończy się na limicie, a nie ma go pośrodku: pełny łuk to 100%
+  // dopuszczalnej pomocy. Wyjście poza limit maluje się osobnym, czerwonym
+  // nadmiarem, żeby przekroczenie było widać jako przekroczenie.
+  const MAKS = 1.0;
   const kat = (u) => Math.PI * (1 + Math.min(u, MAKS)/MAKS);
   const luk = (od, do_, promien, szer, kolor) => {
     const a1 = kat(od), a2 = kat(do_);
@@ -656,25 +718,28 @@ function rysujGauge(g){
       fill:"none", stroke:kolor, "stroke-width":szer, "stroke-linecap":"round"});
   };
   svg.appendChild(luk(0, 1, r, gr, "var(--linia)"));
-  svg.appendChild(luk(1, MAKS, r, gr, "var(--pasmo-zle)"));
   const przekracza = g.wykorzystanie > 1;
-  svg.appendChild(luk(0, g.wykorzystanie, r, gr,
+  svg.appendChild(luk(0, Math.min(g.wykorzystanie, 1), r, gr,
     przekracza ? "var(--zle)" : "var(--dobrze)"));
-  // znacznik limitu
+  // Skala kończy się na limicie, więc przekroczenia nie da się na niej odłożyć —
+  // i dobrze: tarcza odpowiada „mieści się czy nie", a skalę przekroczenia niesie
+  // liczba w środku. Dorysowany łuk nadmiaru tylko myliłby, bo wyglądałby jak
+  // część skali.
   const a = kat(1);
   svg.appendChild(el("line", {
     x1: cx + (r-gr/2-3)*Math.cos(a), y1: cy + (r-gr/2-3)*Math.sin(a),
     x2: cx + (r+gr/2+3)*Math.cos(a), y2: cy + (r+gr/2+3)*Math.sin(a),
     stroke:"var(--tekst)", "stroke-width":2}));
-  svg.appendChild(el("text", {x:cx + (r+gr/2+14)*Math.cos(a), y:cy + (r+gr/2+14)*Math.sin(a),
-    "text-anchor":"middle", class:"os", fill:"var(--tekst-2)"}, "limit"));
   svg.appendChild(el("text", {x:cx, y:cy-14, "text-anchor":"middle",
     style:"font-size:32px;font-weight:700", fill: przekracza ? "var(--zle)" : "var(--dobrze)"},
-    proc(g.wykorzystanie)));
+    proc(g.liczba_glowna)));
+  // „114% dopuszczalnej pomocy” czytało się jak wskaźnik pokrycia finansowania —
+  // sugerowało nadmiar środków, a oznaczało przekroczenie limitu. Etykietę składa
+  // silnik i mówi wprost, czy to zapas, czy przekroczenie.
   svg.appendChild(el("text", {x:cx, y:cy+8, "text-anchor":"middle", class:"os"},
-    "dopuszczalnej pomocy publicznej"));
+    przekracza ? "ponad limit pomocy publicznej" : "zapasu do limitu pomocy publicznej"));
   svg.appendChild(el("text", {x:cx-r, y:cy+18, "text-anchor":"middle", class:"os"}, "0%"));
-  svg.appendChild(el("text", {x:cx+r, y:cy+18, "text-anchor":"middle", class:"os"}, "125%"));
+  svg.appendChild(el("text", {x:cx+r, y:cy+18, "text-anchor":"middle", class:"os"}, "limit"));
   $("#p-gauge").textContent = g.zdanie;
 }
 
@@ -815,7 +880,10 @@ function rysujWerdykty(w){
   if (czynsz) opisy[2] = {liczba: zl2(czynsz.czynsz) + " zł/m²",
                           opis: "przy limicie " + zl2(czynsz.limit_czynszu) + " zł/m²"};
   const zapas = w.wykresy.rekompensata_zapas;
-  opisy[3] = {liczba: proc(zapas.wykorzystanie), opis: "dopuszczalnej pomocy publicznej"};
+  opisy[3] = {
+    liczba: proc(zapas.liczba_glowna),
+    opis: zapas.przechodzi ? "zapasu do limitu pomocy" : "ponad limit pomocy publicznej",
+  };
 
   $("#werdykty").innerHTML = w.werdykty.map((t) => {
     const o = opisy[t.numer];
@@ -995,7 +1063,11 @@ function rysujGrunt(z){
     </div>`).join("");
 
   // Zdania o skutkach składa silnik — niosą progi ustawowe i kwoty.
-  $("#grunt-skutki").innerHTML = g.biezace.opisy.map(x => "• " + x).join("<br>");
+  $("#grunt-skutki").innerHTML = g.biezace.opisy.map(x => "• " + x).join("<br>")
+    + (g.biezace.gmina_ma_wiekszosc
+        ? `<div class="alarm">Gmina obejmuje ${proc(g.biezace.udzial_gminy_w_spolce)}
+             kapitału spółki — większość na zgromadzeniu wspólników.</div>`
+        : "");
 
   $("#grunt-pochodzenia").querySelectorAll(".pochodzenie").forEach((btn) => {
     btn.addEventListener("click", () => {

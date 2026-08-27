@@ -454,6 +454,16 @@ DZWIG_OBOWIAZKOWY_OD_KONDYGNACJI = 3       # kondygnacje naziemne
 DROGA_PUBLICZNA_MIN_SZEROKOSC_M = Decimal("6")
 
 # --------------------------------------------------------------------------
+# Skutek ustrojowy aportu gminy
+# --------------------------------------------------------------------------
+
+# Prog wiekszosci na zgromadzeniu wspolnikow. Nie pochodzi z ustaw o wsparciu
+# mieszkalnictwa, tylko z prawa spolek — art. 245 k.s.h. wymaga bezwzglednej
+# wiekszosci glosow dla uchwal, o ile umowa spolki nie stanowi inaczej.
+# Model traktuje go jako granice kontroli nad spolka.
+WIEKSZOSC_UDZIALOW = Decimal("0.50")
+
+# --------------------------------------------------------------------------
 # Higiena danych wejsciowych (nie jest to stala ustawowa — patrz rozdz. 4 spec.)
 # --------------------------------------------------------------------------
 

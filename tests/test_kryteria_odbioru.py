@@ -277,7 +277,10 @@ class TestKryterium7_BezNumerowArtykulow:
         # glownym — tam podstawa prawna jest dozwolona.
         widoczny = p.evaluate("""() => {
             const kopia = document.body.cloneNode(true);
-            kopia.querySelectorAll("details, .rozwiniecie").forEach(e => e.remove());
+            // script i style nie sa widokiem — innerText na odlaczonym klonie
+            // wciaga ich tresc, wiec komentarz w kodzie dawalby falszywy alarm.
+            kopia.querySelectorAll("script, style, details, .rozwiniecie")
+                 .forEach(e => e.remove());
             return kopia.innerText;
         }""")
         trafienia = re.findall(r"\bart\.\s*\d[^\n]{0,40}|§\s*\d[^\n]{0,40}", widoczny)

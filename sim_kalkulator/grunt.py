@@ -217,6 +217,8 @@ def rozstrzygnij(w: Wejscie) -> UjecieGruntu:
         )
 
     if skutki.gmina_wspolnikiem:
+        # Sama proporcja liczona jest dopiero po zamknieciu montazu — patrz
+        # `silnik.ostrzezenie_o_udzialach`. Tu zostaje sam skutek ustrojowy.
         ostrzezenia.append(
             Ostrzezenie(
                 kod="GMINA_WSPOLNIKIEM_SPOLKI",
