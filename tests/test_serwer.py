@@ -208,8 +208,8 @@ class TestSweep:
         kod, dane = wolaj(adres, "/api/sweep", {"zmiany": {}})
         assert kod == 200
         assert len(dane["punkty"]) == 21
-        assert dane["maksymalny_udzial"] == pytest.approx(0.75)
-        assert dane["punkt_graniczny"] == pytest.approx(0.80)
+        assert dane["maksymalny_udzial"] == pytest.approx(0.70)
+        assert dane["punkt_graniczny"] == pytest.approx(0.75)
 
     def test_punkty_niepoliczalne_niosa_powod(self, adres):
         # W trybie automatycznym caly zakres jest policzalny; niepoliczalne

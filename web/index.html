@@ -175,6 +175,9 @@ button.akcja:disabled{opacity:.55;cursor:progress}
 .zastrzezenia{font-size:11.5px;color:var(--tekst-2);line-height:1.55}
 .zastrzezenia li{margin-bottom:5px}
 .info{font-size:11.5px;color:var(--tekst-3)}
+.znacznik-zalozenia{font-size:10px;text-transform:uppercase;letter-spacing:.04em;
+  padding:1px 5px;border-radius:3px;background:var(--ostrzezenie-tlo,#fdf3d8);
+  color:var(--ostrzezenie-tekst,#7a5c12);vertical-align:middle}
 </style>
 </head>
 <body>
@@ -1152,9 +1155,11 @@ function rysujParametryRynkowe(z){
   $("#parametry-rynkowe").innerHTML =
     `<div class="info">Stan na ${r.data}.</div>` + r.pozycje.map(p => `
       <div class="polex">
-        <label for="r-${p.klucz}">${p.etykieta}</label>
+        <label for="r-${p.klucz}">${p.etykieta}${
+          p.zalozenie ? ' <span class="znacznik-zalozenia">założenie</span>' : ""
+        }</label>
         <input id="r-${p.klucz}" type="number" step="any" value="${p.wartosc ?? ""}">
-      </div>`).join("");
+      </div>` + (p.podpis ? `<div class="info">${p.podpis}</div>` : "")).join("");
   r.pozycje.forEach((p) => {
     const w = document.getElementById("r-" + p.klucz);
     w.addEventListener("change", () => {

@@ -122,6 +122,10 @@ def wynik_json(r: Wynik) -> Dict[str, Any]:
             "oplaty_poza_czynszem": _liczba(limity.limit_oplat_poza_czynszem_m2_mies),
             "udzial_wsparcia": _liczba(limity.udzial_wsparcia),
             "min_dscr": _liczba(proj.minimalny_dscr),
+            "min_pokrycie_obslugi_dlugu": _liczba(proj.minimalne_pokrycie_obslugi_dlugu),
+            "bufor_obslugi_dlugu": _liczba(
+                r.wejscie.parametry_zewnetrzne.minimalny_wskaznik_pokrycia_obslugi_dlugu
+            ),
             "pierwszy_rok_naruszenia": proj.pierwszy_rok_naruszenia,
             "lata": [
                 {
@@ -132,6 +136,7 @@ def wynik_json(r: Wynik) -> Dict[str, Any]:
                     "obsluga_dlugu": _liczba(rok.obsluga_dlugu),
                     "rezerwa_partycypacji": _liczba(rok.rezerwa_zwrot_partycypacji),
                     "dscr": _liczba(rok.dscr),
+                    "pokrycie_obslugi_dlugu": _liczba(rok.pokrycie_obslugi_dlugu),
                     "saldo": _liczba(rok.saldo),
                 }
                 for rok in proj.lata
@@ -1085,6 +1090,16 @@ def zakresy_json(r: Wynik) -> Dict[str, Any]:
                  "wartosc": _liczba(w.parametry_zewnetrzne.wartosc_odtworzeniowa_m2),
                  "podpis": "Wskaźnik przeliczeniowy kosztu odtworzenia 1 m² — z obwieszczenia "
                            "wojewody dla Twojego województwa. Ogłaszany co pół roku."},
+                {"klucz": "parametry_zewnetrzne.minimalny_wskaznik_pokrycia_obslugi_dlugu",
+                 "etykieta": "Wymagany zapas na obsługę kredytu",
+                 "wartosc": _liczba(
+                     w.parametry_zewnetrzne.minimalny_wskaznik_pokrycia_obslugi_dlugu
+                 ),
+                 "zalozenie": True,
+                 "podpis": "O ile nadwyżka z czynszu ma przewyższać ratę. Kalkulator wymierza "
+                           "kredyt z tym zapasem. Tej liczby nie ma w żadnym dokumencie "
+                           "programu — ani w rozporządzeniu o finansowaniu zwrotnym, ani "
+                           "w informatorze BGK. Do potwierdzenia w banku."},
             ],
         },
     }

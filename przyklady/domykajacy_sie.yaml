@@ -33,7 +33,7 @@ grunt:
   # Poziom 2 — w jakiej formie trafia do projektu. Zestaw zalezy od pochodzenia:
   #   inwestor       -> aport_inwestora | spolka_wlascicielem
   #   rynek_prywatny -> nabycie_prywatne
-  #   gmina          -> nabycie_od_gminy | lokal_za_grunt | aport_gminy
+  #   gmina          -> nabycie_od_gminy | lokal_za_grunt
   #                     | uzytkowanie_wieczyste | dzierzawa
   forma: nabycie_od_gminy
   obciazony_hipoteka: false
@@ -92,6 +92,9 @@ parametry_zewnetrzne:
   stopa_irs_bgk: 0.0480
   waloryzacja_partycypacji_rocznie: 0.040   # wskaznik ceny 1 m2 GUS, art. 29a ust. 3
   okres_amortyzacji_budynkow_lat: 100       # limituje okres powierzenia, § 11 rozp. 766
+  # Bufor obslugi dlugu przy wymiarowaniu kredytu (pakiet nr 2, rozdz. 1).
+  # Wpis jest opcjonalny; brak = 1.20. Prog testu 2 pozostaje 1,00 niezaleznie.
+  minimalny_wskaznik_pokrycia_obslugi_dlugu: 1.20
   data_parametrow: 2026-08-01
   zrodla:
     wartosc_odtworzeniowa_m2: "WARTOSC PRZYKLADOWA — podmien na obwieszczenie wojewody, dz. urz. woj."
@@ -101,6 +104,7 @@ parametry_zewnetrzne:
     stopa_irs_bgk: "WARTOSC PRZYKLADOWA — podmien na ogloszenie BGK w BIP dla edycji naboru"
     waloryzacja_partycypacji_rocznie: "WARTOSC PRZYKLADOWA — podmien na wskaznik ceny 1 m2 GUS"
     okres_amortyzacji_budynkow_lat: "WARTOSC PRZYKLADOWA — przyjac okres amortyzacji z polityki rachunkowosci inwestora"
+    minimalny_wskaznik_pokrycia_obslugi_dlugu: "ZALOZENIE — poziom typowy dla nieruchomosci przychodowych; ani rozp. o finansowaniu zwrotnym, ani informator BGK nie podaja wymaganego pokrycia. Do potwierdzenia w BGK."
 
 rekompensata:
   wsparcie_rfrm: 0.0                    # § 7 ust. 7 rozp. 1897 — wlicza sie do rekompensaty
@@ -115,7 +119,8 @@ inwestor:
 
 przelaczniki:
   # automatyczny — silnik liczy najwiekszy kredyt, ktory uniesie zakladany czynsz,
-  #   przez co wskaznik pokrycia wychodzi 1,0, a wynikiem jest wymagany wklad wlasny;
+  #   przez co wskaznik pokrycia wychodzi rowny buforowi, a wynikiem jest wymagany
+  #   wklad wlasny;
   # reczny — kwote wyznacza kredyt.udzial_docelowy, a pokrycie wraca do roli miary.
   tryb_kredytu: automatyczny
   # Kwestie otwarte rozdz. 10 — wartosci domyslne sa ZALOZENIAMI, nie rozstrzygnieciami.

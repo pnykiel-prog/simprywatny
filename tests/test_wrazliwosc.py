@@ -43,12 +43,15 @@ class TestZakresSweepu:
 
 class TestPunktGraniczny:
     def test_maksymalny_udzial_i_punkt_graniczny(self, sweep_domykajacy):
-        assert sweep_domykajacy.maksymalny_udzial_komunalny == D("0.75")
-        assert sweep_domykajacy.punkt_graniczny == D("0.80")
+        # Granica cofnela sie z 0,80 na 0,75 po wprowadzeniu bufora obslugi
+        # dlugu (pakiet nr 2, rozdz. 1) — mniejszy kredyt to wieksza luka
+        # kapitalowa, wiec montaz przestaje sie domykac wczesniej.
+        assert sweep_domykajacy.maksymalny_udzial_komunalny == D("0.70")
+        assert sweep_domykajacy.punkt_graniczny == D("0.75")
 
     def test_ponizej_granicy_wszystko_przechodzi(self, sweep_domykajacy):
         for punkt in sweep_domykajacy.punkty:
-            if punkt.udzial <= D("0.75"):
+            if punkt.udzial <= D("0.70"):
                 assert punkt.domyka_sie is True, punkt.udzial
 
     def test_powyzej_granicy_blokuje_test_montazu(self, sweep_domykajacy):
@@ -175,8 +178,8 @@ class TestWrazliwoscJednoparametrowa:
 class TestAnalizaZbiorcza:
     def test_podsumowanie_podaje_granice_w_procentach(self):
         a = wrazliwosc.build(wczytaj_yaml(DOMYKAJACY), krok=D("0.05"))
+        assert "70%" in a.podsumowanie
         assert "75%" in a.podsumowanie
-        assert "80%" in a.podsumowanie
 
     def test_podsumowanie_braku_domkniecia_wskazuje_test(self):
         a = wrazliwosc.build(wczytaj_yaml(wspolne.WZORCOWY), krok=D("0.25"))

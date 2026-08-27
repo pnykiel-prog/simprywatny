@@ -343,3 +343,100 @@ class TestWplywuCzynszuNaWklad:
             for c in (12.0, 22.0, 30.0)
         }
         assert len(kwoty) == 1
+
+
+class TestBuforaObslugiDlugu:
+    """Pakiet naprawczy nr 2, rozdz. 1 — kredyt wymierzany z marginesem."""
+
+    def test_wartosc_domyslna_wynosi_1_20(self):
+        w = wspolne.wejscie()
+        assert (
+            w.parametry_zewnetrzne.minimalny_wskaznik_pokrycia_obslugi_dlugu
+            == D("1.20")
+        )
+
+    def test_brak_wpisu_daje_wariant_ostrozniejszy_a_nie_brak_bufora(self):
+        # Reguly projektu zabraniaja podstawiania parametrow zewnetrznych. Tutaj
+        # wyjatek jest swiadomy i idzie w strone ostrozniejsza: brak wpisu daje
+        # bufor, a nie jego brak — i zawsze z ostrzezeniem.
+        w = wspolne.wejscie(
+            parametry_zewnetrzne__minimalny_wskaznik_pokrycia_obslugi_dlugu=wspolne.USUN
+        )
+        assert (
+            w.parametry_zewnetrzne.minimalny_wskaznik_pokrycia_obslugi_dlugu
+            == prawo.WSKAZNIK_POKRYCIA_OBSLUGI_DLUGU_DOMYSLNY
+        )
+        assert "ZALOZENIE_BUFOR_OBSLUGI_DLUGU" in {o.kod for o in w.ostrzezenia}
+
+    def test_ponizej_jednosci_jest_bledem_walidacji(self):
+        from sim_kalkulator.dane import BladWalidacji
+
+        with pytest.raises(BladWalidacji):
+            wspolne.wejscie(
+                parametry_zewnetrzne__minimalny_wskaznik_pokrycia_obslugi_dlugu=0.9
+            )
+
+    def test_bez_kredytu_nie_ma_ostrzezenia_o_buforze(self):
+        # Pula wylacznie komunalna — kredyt niedopuszczalny (art. 5a ust. 3),
+        # wiec bufor nie ma czego dotyczyc i nie zaSmieca listy ostrzezen.
+        w = wspolne.wejscie(powierzchnie__udzial_puli_komunalnej=1.0)
+        kody_o = {o.kod for o in w.ostrzezenia}
+        assert "ZALOZENIE_BUFOR_OBSLUGI_DLUGU" not in kody_o
+        assert "BUFOR_OBSLUGI_DLUGU_ZEROWY" not in kody_o
+
+    def test_bufor_obniza_kredyt_i_podnosi_wymagany_wklad(self):
+        bez = przelicz(
+            wspolne.wejscie(
+                parametry_zewnetrzne__minimalny_wskaznik_pokrycia_obslugi_dlugu=1.0
+            )
+        )
+        z_buforem = przelicz(wspolne.wejscie())
+        assert z_buforem.finansowanie.spoleczna.kredyt < bez.finansowanie.spoleczna.kredyt
+        assert (
+            z_buforem.finansowanie.wklad_wlasny_wymagany
+            > bez.finansowanie.wklad_wlasny_wymagany
+        )
+
+    def test_projekcja_potwierdza_zadany_bufor(self):
+        r = przelicz(wspolne.wejscie())
+        osiagniete = r.projekcja.spoleczna.minimalne_pokrycie_obslugi_dlugu
+        zadany = r.wejscie.parametry_zewnetrzne.minimalny_wskaznik_pokrycia_obslugi_dlugu
+        assert osiagniete >= zadany
+
+    def test_api_podaje_bufor_i_osiagniete_pokrycie(self):
+        z = api.wynik_json(przelicz(wspolne.wejscie()))
+        spoleczna = next(p for p in z["pule"] if p["nazwa"] == "spoleczna")
+        assert spoleczna["bufor_obslugi_dlugu"] == pytest.approx(1.20)
+        assert spoleczna["min_pokrycie_obslugi_dlugu"] >= 1.20
+
+    def test_panel_parametrow_oznacza_bufor_jako_zalozenie(self):
+        z = api.zakresy_json(przelicz(wspolne.wejscie()))
+        pozycja = next(
+            p for p in z["parametry_rynkowe"]["pozycje"]
+            if p["klucz"].endswith("minimalny_wskaznik_pokrycia_obslugi_dlugu")
+        )
+        assert pozycja["zalozenie"] is True
+        assert "BGK" in pozycja["podpis"]
+
+    def test_najgorszy_rok_wiaze_a_nie_pierwszy(self):
+        # Odpowiedz na pytanie towarzyszace z rozdz. 1: udzwig liczony jest
+        # na roku najgorszym. Przy indeksacji kosztow szybszej od czynszu
+        # waskie gardlo wypada na koncu okresu, nie w roku pierwszym.
+        r = przelicz(
+            wspolne.wejscie(
+                eksploatacja__indeksacja_kosztow_rocznie=0.045,
+                eksploatacja__indeksacja_czynszu_rocznie=0.020,
+            )
+        )
+        pokrycia = [
+            rok.pokrycie_obslugi_dlugu
+            for rok in r.projekcja.spoleczna.lata
+            if rok.pokrycie_obslugi_dlugu is not None
+        ]
+        assert pokrycia[0] > pokrycia[-1]
+        assert r.projekcja.spoleczna.minimalne_pokrycie_obslugi_dlugu == pokrycia[-1]
+        # Wiazacy jest ostatni rok KREDYTU, a nie ostatni rok sciezki grantowej.
+        # Projekcja bez kredytu konczy sie na 25 latach; gdyby udzwig liczono na
+        # niej, lata 26-30 nie bylyby zbadane i kredyt wyszedlby za duzy.
+        assert len(pokrycia) == r.wejscie.pula_spoleczna.kredyt.okres_lat
+        assert pokrycia[-1] >= D("1.20")

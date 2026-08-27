@@ -19,7 +19,10 @@ from . import wspolne
 KORZEN = Path(__file__).resolve().parent.parent
 DOMYKAJACY = wspolne.KATALOG_PRZYKLADOW / "domykajacy_sie.yaml"
 RYNEK = dict(
-    rynek__czynsz_rynkowy_m2_mies=28.0,
+    # 28,00 zl wystarczalo przed wprowadzeniem bufora obslugi dlugu; z buforem
+    # stawka domykajaca rosnie do 28,12 zl, wiec scenariusz "wszystko sie miesci"
+    # wymaga wyzszego pulapu rynkowego.
+    rynek__czynsz_rynkowy_m2_mies=32.0,
     rynek__zrodlo="mediana z 15 ofert 40-55 m2, portal ogloszeniowy",
     rynek__data="2026-08-10",
 )
@@ -132,7 +135,7 @@ class TestPulaKomunalna:
         assert wiersz(poziomy(**RYNEK), "komunalna")["sufit_rodzaj"] == "prawny"
 
     def test_wiersz_spoleczny_linie_rynkowa_ma(self):
-        assert wiersz(poziomy(**RYNEK), "spoleczna")["rynkowy"] == 28.0
+        assert wiersz(poziomy(**RYNEK), "spoleczna")["rynkowy"] == 32.0
 
     def test_przy_czystej_puli_komunalnej_jest_jeden_wiersz(self):
         dane = poziomy(powierzchnie__udzial_puli_komunalnej=1.0, **RYNEK)

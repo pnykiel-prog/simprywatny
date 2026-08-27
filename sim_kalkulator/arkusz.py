@@ -337,6 +337,16 @@ def _zalozenia(wb: Workbook, wynik: Wynik, rej: Rejestr) -> None:
                 zrodlo=pz.zrodla.get(klucz.replace("wartosc_odtworzeniowa", "wartosc_odtworzeniowa_m2"), "")
                 or _zrodlo_parametru(pz, nazwa),
                 format_liczby=fmt, zolte=True)
+    wejscie(
+        "bufor_dscr", "Minimalny wskaznik pokrycia obslugi dlugu",
+        pz.minimalny_wskaznik_pokrycia_obslugi_dlugu, "krotnosc",
+        zrodlo=(
+            "ZALOZENIE, nie odczyt przepisu — ani rozp. o finansowaniu zwrotnym, "
+            "ani informator BGK nie podaja wymaganego pokrycia. Do potwierdzenia w BGK. "
+            "Wymiaruje kredyt maksymalny; prog testu 2 pozostaje 1,00."
+        ),
+        format_liczby="0.00", zolte=True,
+    )
     wejscie("data_parametrow", "Data parametrow", pz.data_parametrow.isoformat(), "",
             zrodlo=f"Prog starzenia: {prawo.PARAMETRY_MAKSYMALNY_WIEK_MIESIECY} miesiecy.",
             format_liczby=TEKST, zolte=True)
@@ -1260,8 +1270,9 @@ def _projekcja_arkusz(
         "Rok", "Indeks czynszu", "Indeks kosztow", "Czynsz zl/m2/mies.",
         "Przychod potencjalny", "Pustostany", "Przychod netto",
         "Eksploatacja", "Odpis remontowy", "Ubezpieczenie", "Zarzad", "Oplata za grunt",
-        "Obsluga dlugu", "Rezerwa partycypacji", "Wymagane pokrycie", "DSCR", "Saldo",
-        "Pulap kredytu",
+        "Obsluga dlugu", "Rezerwa partycypacji", "Wymagane pokrycie",
+        "Pokrycie wyplywow (test 2)", "Saldo",
+        "Pulap kredytu", "Pokrycie obslugi dlugu (bankowe)",
     ]
     for kol, tytul_kol in enumerate(naglowki, start=1):
         komorka = ws.cell(row=wiersz, column=kol, value=tytul_kol)
@@ -1338,8 +1349,16 @@ def _projekcja_arkusz(
             ws.cell(
                 row=w, column=18,
                 value=(f"=IF({rok}>{rej['kredyt_n']},\"\",IF({wspolczynnik}<=0,\"\","
-                       f"MAX(0,(G{w}-SUM(H{w}:L{w}))/{wspolczynnik})))"),
+                       f"MAX(0,(G{w}-SUM(H{w}:L{w}))/{rej['bufor_dscr']}"
+                       f"/{wspolczynnik})))"),
             ).number_format = KWOTA
+            # Kolumna S — pokrycie bankowe: nadwyzka operacyjna do samej raty.
+            # To ta wielkosc ustawia bufor, a nie kolumna P (tam mianownikiem sa
+            # wszystkie wyplywy). Dwie rozne liczby, dwie rozne role.
+            ws.cell(
+                row=w, column=19,
+                value=f'=IF(M{w}<=0,"",(G{w}-SUM(H{w}:L{w}))/M{w})',
+            ).number_format = WSKAZNIK
         rej.zapisz_wiersz(f"{p}.proj_rok_{rok}", w)
         wiersz += 1
     ostatni = wiersz - 1
@@ -1356,17 +1375,32 @@ def _projekcja_arkusz(
         komorka.font = Font(bold=True)
     wiersz += 1
 
-    ws.cell(row=wiersz, column=1, value="Minimalny DSCR").font = Font(bold=True)
+    ws.cell(row=wiersz, column=1, value="Minimalne pokrycie wyplywow (test 2)").font = Font(bold=True)
     komorka = ws.cell(row=wiersz, column=16, value=f"=MIN(P{pierwszy}:P{ostatni})")
     komorka.number_format = WSKAZNIK
     komorka.font = Font(bold=True)
     rej.zapisz(f"{p}.min_dscr", nazwa, _bezwzgledny("P", wiersz))
     wiersz += 1
 
+    # Rejestrowane zawsze, takze w puli komunalnej — tam kredyt jest niedopuszczalny
+    # (art. 5a ust. 3), wiec kolumna S jest pusta i komorka pokazuje "brak dlugu".
+    # Pusty rejestr wywrocilby tabele werdyktow, ktora czyta oba klucze.
+    ws.cell(
+        row=wiersz, column=1, value="Minimalne pokrycie obslugi dlugu (bankowe)"
+    ).font = Font(bold=True)
+    komorka = ws.cell(
+        row=wiersz, column=19,
+        value=f'=IF(COUNT(S{pierwszy}:S{ostatni})=0,"brak dlugu",MIN(S{pierwszy}:S{ostatni}))',
+    )
+    komorka.number_format = WSKAZNIK
+    komorka.font = Font(bold=True)
+    rej.zapisz(f"{p}.min_pokrycie_dlugu", nazwa, _bezwzgledny("S", wiersz))
+    wiersz += 1
+
     if kredyt and rej.ma(f"{p}.annuita_jednostkowa"):
         rej.zapisz(f"{p}.pulapy", nazwa, f"$R${pierwszy}:$R${ostatni}")
 
-    ws.cell(row=wiersz, column=1, value="Lat z DSCR ponizej 1,0").font = Font(bold=True)
+    ws.cell(row=wiersz, column=1, value="Lat z pokryciem wyplywow ponizej 1,0").font = Font(bold=True)
     komorka = ws.cell(
         row=wiersz, column=16,
         value=f'=COUNTIF(P{pierwszy}:P{ostatni},"<1")',
@@ -1809,8 +1843,11 @@ def _werdykty(wb: Workbook, wynik: Wynik, rej: Rejestr) -> None:
         ("Limit czynszu wiazacy", "spol.limit_wiazacy", "kom.limit_wiazacy", STAWKA),
         ("Czynsz zakladany", "spol.czynsz", "kom.czynsz", STAWKA),
         ("Zapas do limitu", "spol.zapas", "kom.zapas", STAWKA),
-        ("Minimalny DSCR", "spol.min_dscr", "kom.min_dscr", WSKAZNIK),
-        ("Lat z DSCR ponizej 1,0", "spol.lat_naruszenia", "kom.lat_naruszenia", "0"),
+        ("Minimalne pokrycie wyplywow (test 2)", "spol.min_dscr", "kom.min_dscr", WSKAZNIK),
+        ("Minimalne pokrycie obslugi dlugu (bankowe)",
+         "spol.min_pokrycie_dlugu", "kom.min_pokrycie_dlugu", WSKAZNIK),
+        ("Lat z pokryciem wyplywow ponizej 1,0",
+         "spol.lat_naruszenia", "kom.lat_naruszenia", "0"),
     ):
         etykieta(nazwa)
         wart(f"={rej[klucz_spol]}", fmt, kol=2)

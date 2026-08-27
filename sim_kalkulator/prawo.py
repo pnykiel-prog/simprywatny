@@ -456,6 +456,26 @@ DROGA_PUBLICZNA_MIN_SZEROKOSC_M = Decimal("6")
 # niz 6 miesiecy. To wymog metodyczny projektu, nie przepis.
 PARAMETRY_MAKSYMALNY_WIEK_MIESIECY = 6
 
+# Pakiet naprawczy nr 2, rozdz. 1 — minimalny wskaznik pokrycia obslugi dlugu
+# przyjmowany przy WYMIAROWANIU kredytu maksymalnego.
+#
+# NIE JEST TO STALA USTAWOWA ANI ODCZYT Z DOKUMENTU PROGRAMU. Ani rozporzadzenie
+# o finansowaniu zwrotnym, ani informator BGK nie podaja wymaganego pokrycia.
+# 1,20 jest wartoscia typowa dla kredytowania nieruchomosci przychodowych
+# i wchodzi tu jako ostrozne zalozenie do potwierdzenia w BGK — silnik oznacza
+# je ostrzezeniem przy kazdym przeliczeniu ze sciezka kredytowa.
+#
+# Rozroznienie, ktore latwo zgubic: 1,0 pozostaje progiem TESTU 2 (montaz sie
+# spina albo nie), a ponizsza wartosc jest marginesem przyjmowanym przy
+# wyznaczaniu kwoty kredytu. Kredyt wymiarowany z buforem daje w projekcji
+# pokrycie okolo 1,2 i test przechodzi z zapasem — to sa dwie rozne liczby
+# o dwoch roznych rolach, nie jedna liczba w dwoch miejscach.
+WSKAZNIK_POKRYCIA_OBSLUGI_DLUGU_DOMYSLNY = Decimal("1.20")
+
+# Ponizej tej wartosci wymiarowanie kredytu nie ma sensu — pokrycie mniejsze
+# niz jednosc oznacza rate, ktorej przychod nie unosi juz w chwili wyliczenia.
+WSKAZNIK_POKRYCIA_OBSLUGI_DLUGU_MINIMUM = Decimal("1.00")
+
 
 # --------------------------------------------------------------------------
 # Odczyt tabel

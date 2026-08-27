@@ -341,7 +341,20 @@ class ParametryZewnetrzne:
     waloryzacja_partycypacji_rocznie: Decimal  # wskaznik ceny 1 m2 GUS, art. 29a ust. 3
     okres_amortyzacji_budynkow_lat: int      # limit okresu powierzenia, § 11 rozp. 766
     data_parametrow: _dt.date
+    # Margines przyjmowany przy WYMIAROWANIU kredytu maksymalnego (pakiet nr 2,
+    # rozdz. 1). Nie jest odczytem z przepisu ani z informatora BGK — patrz
+    # `prawo.WSKAZNIK_POKRYCIA_OBSLUGI_DLUGU_DOMYSLNY`. Pole ma wartosc domyslna,
+    # bo brak wpisu ma dawac wariant ostrozniejszy, a nie wariant bez bufora;
+    # sama wartosc nigdy nie przechodzi po cichu — silnik oznacza ja ostrzezeniem.
+    minimalny_wskaznik_pokrycia_obslugi_dlugu: Decimal = (
+        prawo.WSKAZNIK_POKRYCIA_OBSLUGI_DLUGU_DOMYSLNY
+    )
     zrodla: Mapping[str, str] = field(default_factory=dict)
+
+    @property
+    def bufor_obslugi_dlugu_podany(self) -> bool:
+        """Czy wskaznik pokrycia pochodzi z wejscia, czy z wartosci domyslnej."""
+        return "minimalny_wskaznik_pokrycia_obslugi_dlugu" in self.zrodla
 
     def wiek_miesiecy(self, na_dzien: Optional[_dt.date] = None) -> int:
         na_dzien = na_dzien or _dt.date.today()
@@ -528,6 +541,29 @@ def _kwota_opcjonalna(sekcja: Mapping[str, Any], klucz: str, sciezka: str) -> Op
     return _kwota(sekcja, klucz, sciezka)
 
 
+def _wskaznik_pokrycia(sekcja: Mapping[str, Any]) -> Decimal:
+    """Minimalny wskaznik pokrycia obslugi dlugu — pakiet nr 2, rozdz. 1.
+
+    Jedyny parametr zewnetrzny z wartoscia domyslna, i to swiadomie. Reszta
+    sekcji to odczyty (obwieszczenie wojewody, stopy, wskaznik GUS), ktorych
+    podstawic sie nie da; tutaj chodzi o margines ostroznosci przy wymiarowaniu
+    kredytu. Brak wpisu ma dawac wariant ostrozniejszy, a nie wariant bez bufora
+    — dlatego zamiast bledu wchodzi 1,20 z jawnym ostrzezeniem.
+    """
+    klucz = "minimalny_wskaznik_pokrycia_obslugi_dlugu"
+    if klucz not in sekcja or sekcja[klucz] is None:
+        return prawo.WSKAZNIK_POKRYCIA_OBSLUGI_DLUGU_DOMYSLNY
+    wartosc = _kwota(sekcja, klucz, "parametry_zewnetrzne")
+    if wartosc < prawo.WSKAZNIK_POKRYCIA_OBSLUGI_DLUGU_MINIMUM:
+        raise BladWalidacji(
+            f"'parametry_zewnetrzne.{klucz}' wynosi {wartosc}, a nie moze byc "
+            f"mniejszy niz {prawo.WSKAZNIK_POKRYCIA_OBSLUGI_DLUGU_MINIMUM}. "
+            "Pokrycie ponizej jednosci oznacza rate, ktorej przychod nie unosi "
+            "juz w chwili wyliczenia — to nie jest montaz, tylko niedobor."
+        )
+    return wartosc
+
+
 def _calkowita(sekcja: Mapping[str, Any], klucz: str, sciezka: str) -> int:
     if klucz not in sekcja or sekcja[klucz] is None:
         raise BladValidacjiBrak(f"{sciezka}.{klucz}")
@@ -705,6 +741,7 @@ def zbuduj(dane: Mapping[str, Any], na_dzien: Optional[_dt.date] = None) -> Wejs
         okres_amortyzacji_budynkow_lat=_calkowita(
             sz, "okres_amortyzacji_budynkow_lat", "parametry_zewnetrzne"
         ),
+        minimalny_wskaznik_pokrycia_obslugi_dlugu=_wskaznik_pokrycia(sz),
         data_parametrow=_data(sz, "data_parametrow", "parametry_zewnetrzne"),
         zrodla=dict(sz.get("zrodla") or {}),
     )
@@ -1276,6 +1313,62 @@ def _waliduj_parametry(
                 waga=Waga.POZOSTALE,
             )
         )
+
+    _waliduj_bufor_obslugi_dlugu(w, ostrzezenia)
+
+
+def _waliduj_bufor_obslugi_dlugu(w: Wejscie, ostrzezenia: List[Ostrzezenie]) -> None:
+    """Bufor obslugi dlugu jest zalozeniem — i ma byc widoczny jako zalozenie.
+
+    Pakiet naprawczy nr 2, rozdz. 1. Ostrzezenie idzie za kazdym razem, gdy
+    sciezka kredytowa jest wlaczona, niezaleznie od tego, czy wartosc wpisano
+    recznie, czy weszla domyslna. Nie chodzi o brak wpisu, tylko o to, ze samej
+    liczby nie ma z czego odczytac: nie podaje jej ani rozporzadzenie
+    o finansowaniu zwrotnym, ani informator BGK.
+    """
+    if not w.pula_spoleczna.kredyt.aktywny:
+        return                              # bez kredytu nie ma czego buforowac
+    if w.powierzchnie.udzial_puli_komunalnej >= 1:
+        return                              # sama pula komunalna — kredyt tam nie wchodzi
+    wskaznik = w.parametry_zewnetrzne.minimalny_wskaznik_pokrycia_obslugi_dlugu
+    if wskaznik == prawo.WSKAZNIK_POKRYCIA_OBSLUGI_DLUGU_MINIMUM:
+        ostrzezenia.append(
+            Ostrzezenie(
+                kod="BUFOR_OBSLUGI_DLUGU_ZEROWY",
+                tresc=(
+                    "Kredyt maksymalny wymierzony przy wskazniku pokrycia obslugi dlugu "
+                    "1,00 — cala nadwyzka operacyjna idzie na rate, bez marginesu. "
+                    "Pierwsze odchylenie od zalozen (pustostan ponad plan, awaria, wzrost "
+                    "kosztow energii) daje niedobor na racie. Zaden bank tak nie kredytuje."
+                ),
+                podstawa="pakiet naprawczy nr 2, rozdz. 1 — zalozenie modelu",
+                tresc_potoczna=(
+                    "Kredyt policzony bez marginesu bezpieczeństwa: cała nadwyżka z czynszu "
+                    "idzie na ratę. To wynik graniczny, a nie kwota, którą bank przyzna."
+                ),
+                waga=Waga.ZMIENIA_KWOTE,
+            )
+        )
+        return
+    ostrzezenia.append(
+        Ostrzezenie(
+            kod="ZALOZENIE_BUFOR_OBSLUGI_DLUGU",
+            tresc=(
+                f"Kredyt maksymalny wymierzony przy wskazniku pokrycia obslugi dlugu "
+                f"{wskaznik:.2f}. Wartosc jest ZALOZENIEM, nie odczytem: ani rozporzadzenie "
+                "o finansowaniu zwrotnym, ani informator BGK nie podaja wymaganego pokrycia. "
+                f"{wskaznik:.2f} jest poziomem typowym dla kredytowania nieruchomosci "
+                "przychodowych. Do potwierdzenia w BGK przed naborem — inny wskaznik zmienia "
+                "kwote kredytu, a przez to wymagany wklad wlasny."
+            ),
+            podstawa="pakiet naprawczy nr 2, rozdz. 1 — zalozenie do potwierdzenia w BGK",
+            tresc_potoczna=(
+                f"Przyjęto, że bank wymaga zapasu {wskaznik:.2f}× na obsługę kredytu. "
+                "Tej liczby nie ma w żadnym dokumencie programu — trzeba ją potwierdzić w BGK."
+            ),
+            waga=Waga.ZMIENIA_KWOTE,
+        )
+    )
 
 
 def _waliduj_przelaczniki(w: Wejscie, ostrzezenia: List[Ostrzezenie]) -> None:

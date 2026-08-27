@@ -119,9 +119,18 @@ def porownaj_z_silnikiem(plik: Path, wejscie: Path) -> List[str]:
             float(max(0, r.finansowanie.wklad_gotowkowy_wymagany - dostepny)),
         ))
     if r.projekcja.spoleczna.minimalny_dscr is not None:
-        kontrole.append(
-            ("Pula_spoleczna", "Minimalny DSCR", 16, float(r.projekcja.spoleczna.minimalny_dscr))
-        )
+        kontrole.append((
+            "Pula_spoleczna", "Minimalne pokrycie wyplywow (test 2)", 16,
+            float(r.projekcja.spoleczna.minimalny_dscr),
+        ))
+    if r.projekcja.spoleczna.minimalne_pokrycie_obslugi_dlugu is not None:
+        # Kontrola bufora obslugi dlugu — arkusz ma go liczyc formula, a nie
+        # dziedziczyc po silniku. Rozjazd tutaj znaczy, ze kolumna S i wzor
+        # w `kredyt_maksymalny_obslugiwalny` opisuja dwa rozne banki.
+        kontrole.append((
+            "Pula_spoleczna", "Minimalne pokrycie obslugi dlugu (bankowe)", 19,
+            float(r.projekcja.spoleczna.minimalne_pokrycie_obslugi_dlugu),
+        ))
     if r.edb_kredytu > 0:
         kontrole.append(("Rekompensata", "EDB kredytu", 11, float(r.edb_kredytu)))
 

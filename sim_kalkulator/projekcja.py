@@ -274,16 +274,41 @@ class RokProjekcji:
         )
 
     @property
+    def nadwyzka_operacyjna(self) -> Decimal:
+        """Przychod netto po kosztach biezacych, przed rata — bankowe NOI."""
+        return self.przychod_czynszowy_netto - self.koszty_operacyjne
+
+    @property
     def wymagane_pokrycie(self) -> Decimal:
         """Mianownik testu 2: koszty eksploatacji + odpis remontowy + rata kredytu."""
         return self.koszty_operacyjne + self.obsluga_dlugu
 
     @property
     def dscr(self) -> Optional[Decimal]:
-        """Wskaznik pokrycia obslugi dlugu. None, gdy nie ma czego pokrywac."""
+        """Wskaznik pokrycia WYPLYWOW — miara testu 2, prog 1,0.
+
+        UWAGA na nazwe: mianownikiem sa TU wszystkie wyplywy biezace, nie sama
+        rata. To nie jest DSCR w rozumieniu bankowym — ten liczy sie od nadwyzki
+        operacyjnej i siedzi w `pokrycie_obslugi_dlugu`. Obie wielkosci sa
+        potrzebne i obie sa rozne: przy racie wymierzonej na pokrycie bankowe
+        1,20 ten wskaznik wychodzi okolo 1,09, bo dzieli sie przez wieksza kwote.
+        """
         if self.wymagane_pokrycie == ZERO:
             return None
         return self.przychod_czynszowy_netto / self.wymagane_pokrycie
+
+    @property
+    def pokrycie_obslugi_dlugu(self) -> Optional[Decimal]:
+        """DSCR w rozumieniu bankowym: nadwyzka operacyjna do raty.
+
+        To jest wielkosc, ktora ustawia
+        `parametry_zewnetrzne.minimalny_wskaznik_pokrycia_obslugi_dlugu`.
+        None w roku bez raty — brak dlugu to nie jest nieskonczone pokrycie,
+        tylko brak pytania.
+        """
+        if self.obsluga_dlugu <= ZERO:
+            return None
+        return self.nadwyzka_operacyjna / self.obsluga_dlugu
 
     @property
     def luka_roczna(self) -> Decimal:
@@ -323,7 +348,24 @@ class ProjekcjaPuli:
 
     @property
     def minimalny_dscr(self) -> Optional[Decimal]:
+        """Najgorszy rok wskaznika pokrycia wyplywow — miary testu 2."""
         wartosci = [r.dscr for r in self.lata if r.dscr is not None]
+        return min(wartosci) if wartosci else None
+
+    @property
+    def minimalne_pokrycie_obslugi_dlugu(self) -> Optional[Decimal]:
+        """Najgorszy rok pokrycia bankowego — to porownuje sie z buforem.
+
+        Bank patrzy na rok najgorszy, nie na pierwszy i nie na srednia. Przy
+        czynszu i kosztach indeksowanych roznymi stawkami te trzy wielkosci
+        sie rozjezdzaja, wiec wybor ma znaczenie — i tu, i przy wymiarowaniu
+        kredytu w `silnik.kredyt_maksymalny_obslugiwalny`.
+        """
+        wartosci = [
+            r.pokrycie_obslugi_dlugu
+            for r in self.lata
+            if r.pokrycie_obslugi_dlugu is not None
+        ]
         return min(wartosci) if wartosci else None
 
     @property
@@ -440,7 +482,16 @@ def build(
     fin: Finansowanie,
     limity_spoleczna: LimityCzynszu,
     limity_komunalna: LimityCzynszu,
+    horyzont_spoleczna: Optional[int] = None,
 ) -> Projekcja:
+    """Projekcja obu pul. `horyzont_spoleczna` nadpisuje dlugosc puli spolecznej.
+
+    Nadpisanie sluzy jednemu celowi: wymiarowaniu kredytu. Udzwig liczy sie na
+    projekcji BEZ kredytu, a ta idzie sciezka grantowa, czyli 25 lat. Kredyt
+    biegnie do 30 — bez nadpisania lata 26-30 nie bylyby w ogole zbadane, a to
+    wlasnie one sa najgorsze, gdy koszty indeksuja sie szybciej niz czynsz.
+    Poza tym jednym uzyciem parametr zostaje pusty i horyzont wynika ze sciezki.
+    """
     kredyt_aktywny = fin.harmonogram_kredytu.aktywny
     sciezka_spoleczna = "kredyt" if kredyt_aktywny else "grant"
 
@@ -459,7 +510,7 @@ def build(
             fin.spoleczna,
             fin.harmonogram_kredytu if kredyt_aktywny else None,
             w.eksploatacja.pustostany_procent,
-            okres_powierzenia(w, sciezka_kredytowa=kredyt_aktywny),
+            horyzont_spoleczna or okres_powierzenia(w, sciezka_kredytowa=kredyt_aktywny),
             sciezka_spoleczna,
         ),
         komunalna=_projekcja_puli(

@@ -4,6 +4,7 @@ from decimal import Decimal as D
 
 import pytest
 
+from sim_kalkulator import prawo
 from sim_kalkulator.dane import wczytaj_yaml, zbuduj
 from sim_kalkulator.silnik import (
     WynikNieobliczalny,
@@ -109,16 +110,68 @@ class TestKredytAutomatyczny:
     """Rozdz. 2.2 — kredyt liczony, nie wpisywany. Pokrycie 1,0 z konstrukcji."""
 
     def test_wskaznik_pokrycia_nigdy_nie_schodzi_ponizej_jednosci(self):
-        # Test 2 spelniony z konstrukcji. Pokrycie wychodzi dokladnie 1,0, gdy
-        # wiazacy jest czynsz, i wyzej, gdy kredytu potrzeba mniej, niz czynsz
-        # uniesie — nikt nie zaciaga wiecej, niz brakuje po dotacji.
+        # Test 2 spelniony z konstrukcji. Pokrycie wychodzi dokladnie tyle, ile
+        # wynosi bufor, gdy wiazacy jest czynsz, i wyzej, gdy kredytu potrzeba
+        # mniej, niz czynsz uniesie — nikt nie zaciaga wiecej, niz brakuje po
+        # dotacji.
         for czynsz in (14.0, 18.0, 22.0, 26.0):
             r = wynik(pula_spoleczna__czynsz_zakladany_m2_mies=czynsz)
             assert r.projekcja.spoleczna.minimalny_dscr >= D("1"), czynsz
 
-    def test_pokrycie_wychodzi_dokladnie_jeden_gdy_wiaze_czynsz(self):
+    def test_pokrycie_wychodzi_na_poziomie_bufora_gdy_wiaze_czynsz(self):
+        # Pakiet nr 2, rozdz. 1: kredyt wymierzony z buforem daje w projekcji
+        # pokrycie rowne buforowi, nie jednosci. Prog testu 2 to nadal 1,00,
+        # wiec test przechodzi z zapasem — i o to zapas chodzi.
         r = wynik(pula_spoleczna__czynsz_zakladany_m2_mies=14.0)
-        assert r.projekcja.spoleczna.minimalny_dscr < D("1.001")
+        bufor = prawo.WSKAZNIK_POKRYCIA_OBSLUGI_DLUGU_DOMYSLNY
+        pokrycie = r.projekcja.spoleczna.minimalne_pokrycie_obslugi_dlugu
+        assert bufor <= pokrycie < bufor + D("0.001")
+
+    def test_dwie_miary_pokrycia_to_dwie_rozne_liczby(self):
+        # Miara testu 2 dzieli przychod przez WSZYSTKIE wyplywy, pokrycie bankowe
+        # dzieli nadwyzke operacyjna przez sama rate. Przy tej samej racie druga
+        # jest wyzsza. Zamiana ich miejscami przewrocilaby werdykt testu 2.
+        p = wynik(pula_spoleczna__czynsz_zakladany_m2_mies=14.0).projekcja.spoleczna
+        assert p.minimalny_dscr < p.minimalne_pokrycie_obslugi_dlugu
+        rok = p.lata[0]
+        assert rok.dscr == rok.przychod_czynszowy_netto / rok.wymagane_pokrycie
+        assert rok.pokrycie_obslugi_dlugu == rok.nadwyzka_operacyjna / rok.obsluga_dlugu
+
+    def test_wyzszy_bufor_obniza_kredyt_maksymalny(self):
+        bez = wynik(
+            pula_spoleczna__czynsz_zakladany_m2_mies=14.0,
+            parametry_zewnetrzne__minimalny_wskaznik_pokrycia_obslugi_dlugu=1.0,
+        )
+        z_buforem = wynik(pula_spoleczna__czynsz_zakladany_m2_mies=14.0)
+        assert z_buforem.finansowanie.spoleczna.kredyt < bez.finansowanie.spoleczna.kredyt
+        # Kredyt wiazany czynszem skaluje sie odwrotnie proporcjonalnie do bufora.
+        iloraz = bez.finansowanie.spoleczna.kredyt / z_buforem.finansowanie.spoleczna.kredyt
+        assert abs(iloraz - prawo.WSKAZNIK_POKRYCIA_OBSLUGI_DLUGU_DOMYSLNY) < D("0.001")
+
+    def test_brak_bufora_daje_ostrzezenie_o_finansowaniu_bez_marginesu(self):
+        w = wspolne.wejscie(
+            parametry_zewnetrzne__minimalny_wskaznik_pokrycia_obslugi_dlugu=1.0
+        )
+        kody = {o.kod for o in w.ostrzezenia}
+        assert "BUFOR_OBSLUGI_DLUGU_ZEROWY" in kody
+        assert "ZALOZENIE_BUFOR_OBSLUGI_DLUGU" not in kody
+
+    def test_bufor_domyslny_jest_oznaczony_jako_zalozenie(self):
+        kody = {o.kod for o in wspolne.wejscie().ostrzezenia}
+        assert "ZALOZENIE_BUFOR_OBSLUGI_DLUGU" in kody
+
+    def test_stawka_domykajaca_odwraca_wymiarowanie_z_buforem(self):
+        # Symetria obu funkcji: przy stawce domykajacej wymagany wklad gotowkowy
+        # schodzi do zera. Gdyby bufor wchodzil tylko do jednej z nich, stawka
+        # domykalaby kwote, ktorej silnik nie przyjmuje.
+        r = wynik(pula_spoleczna__czynsz_zakladany_m2_mies=14.0)
+        stawka = r.czynsz_domykajacy_m2_mies
+        assert stawka is not None
+        przy_stawce = wynik(
+            pula_spoleczna__czynsz_zakladany_m2_mies=float(stawka),
+            powierzchnie__udzial_puli_komunalnej=0.0,
+        )
+        assert przy_stawce.finansowanie.wklad_gotowkowy_wymagany < D("1000")
 
     def test_kredyt_nie_przekracza_tego_co_potrzebne(self):
         # Bez tego ograniczenia wymagany wklad wlasny wychodzilby ujemny.
@@ -318,10 +371,14 @@ class TestRegresjaPrzykladow:
         assert r.werdykty.wiazace_ograniczenie.startswith("Test 3")
 
     def test_wzorcowy_zamrozone_liczby(self):
+        # Kwoty po wprowadzeniu bufora obslugi dlugu (pakiet nr 2, rozdz. 1).
+        # Wczesniej kredyt wynosil 7 190 750 zl i wiazala go POTRZEBA — koszty
+        # po dotacji i partycypacji. Z buforem 1,20 wiaze udzwig czynszowy,
+        # kredyt spada o 852 tys. zl, a caly ubytek przechodzi na wklad wlasny.
         r = przelicz(wczytaj_yaml(wspolne.WZORCOWY))
         assert r.alokacja.koszty_laczne == D("29050000.00")
-        assert r.finansowanie.spoleczna.kredyt == D("7190750")
-        assert r.finansowanie.wklad_wlasny_wymagany == D("1743000.00")
+        assert r.finansowanie.spoleczna.kredyt == D("6338861")
+        assert r.finansowanie.wklad_wlasny_wymagany == D("2594889.00")
         assert r.granty.spoleczna.udzial_wsparcia.quantize(D("0.0001")) == D("0.4464")
         assert r.granty.komunalna.udzial_wsparcia == D("0.80")
 
@@ -333,8 +390,8 @@ class TestRegresjaPrzykladow:
     def test_domykajacy_sie_zamrozone_liczby(self):
         r = przelicz(wczytaj_yaml(wspolne.KATALOG_PRZYKLADOW / "domykajacy_sie.yaml"))
         assert r.alokacja.koszty_laczne == D("29050000.00")
-        assert r.finansowanie.spoleczna.kredyt == D("7190750")
-        assert r.finansowanie.wklad_wlasny_wymagany == D("1743000.00")
+        assert r.finansowanie.spoleczna.kredyt == D("6280483")
+        assert r.finansowanie.wklad_wlasny_wymagany == D("2653267.00")
         assert r.projekcja.spoleczna.pierwszy_rok_naruszenia is None
 
     def test_oba_przyklady_maja_te_same_koszty_a_inny_werdykt(self):

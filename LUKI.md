@@ -586,3 +586,85 @@ roczne w kosztach bieżących.
 
 **Po usunięciu aportu jest to jedyna forma gruntu, przy której rozstrzygnięcie
 interpretacyjne istotnie zmienia wynik** — pytanie do BGK awansuje w kolejności.
+
+---
+
+## 18. Wymagany zapas na obsługę kredytu — liczba, której nie ma w dokumentach
+
+**Status: założenie, wartość domyślna 1,20. Do potwierdzenia w BGK.**
+
+### 18.1. Czego szukano i czego nie znaleziono
+
+Kredyt maksymalny liczony był dotąd przy pokryciu obsługi długu równym 1,0 —
+cała nadwyżka operacyjna szła na ratę. Przy takim wymiarowaniu pierwsze
+odchylenie od założeń (pustostan ponad plan, awaria, skok kosztów energii)
+daje niedobór na racie w tym samym roku.
+
+Wymaganego pokrycia **nie podaje ani rozporządzenie o finansowaniu zwrotnym
+(t.j. Dz.U. 2021 poz. 766), ani informator BGK o programie SBC**. Jest to
+element polityki kredytowej banku, a nie parametr programu.
+
+### 18.2. Co przyjęto
+
+`parametry_zewnetrzne.minimalny_wskaznik_pokrycia_obslugi_dlugu`, domyślnie
+**1,20**. Poziom typowy dla kredytowania nieruchomości przychodowych. Silnik
+oznacza go ostrzeżeniem `ZALOZENIE_BUFOR_OBSLUGI_DLUGU` przy każdym przeliczeniu
+ze ścieżką kredytową, a arkusz — żółtą komórką z adnotacją o źródle.
+
+Jest to **jedyny parametr zewnętrzny z wartością domyślną**. Odstępstwo od reguły
+„brak danej daje jawny stan »nie podano«" jest świadome i idzie w stronę
+ostrożniejszą: brak wpisu daje bufor, a nie jego brak. Milcząco nie przechodzi
+nigdy — ostrzeżenie towarzyszy także wartości domyślnej.
+
+Ustawienie 1,00 pozostaje dopuszczalne i daje osobne ostrzeżenie
+`BUFOR_OBSLUGI_DLUGU_ZEROWY`. Wartości poniżej 1,00 są błędem walidacji.
+
+### 18.3. Ile to zmienia w scenariuszu odniesienia
+
+| | bez bufora (1,00) | z buforem (1,20) |
+|---|---|---|
+| Kredyt puli społecznej | 7 190 750 zł | 6 338 861 zł |
+| Wymagany wkład własny | 1 743 000 zł | 2 594 889 zł |
+| Granica udziału komunalnego (przykład domykający się) | 75% | 70% |
+
+Przed zmianą kredyt wiązała **potrzeba** — koszty po dotacji i partycypacji.
+Po zmianie wiąże **udźwig czynszowy**. Cały ubytek kredytu przechodzi na wkład
+własny, bo nic innego tej pozycji nie zastąpi.
+
+### 18.4. Dwie miary pokrycia, które łatwo pomylić
+
+Model liczy dwa wskaźniki i obu potrzebuje:
+
+- **pokrycie wypływów** (`dscr`, próg testu 2 = 1,00) — przychód netto podzielony
+  przez wszystkie wypływy bieżące razem z ratą;
+- **pokrycie obsługi długu** (`pokrycie_obslugi_dlugu`) — nadwyżka operacyjna
+  podzielona przez samą ratę. To ta wielkość, którą ustawia bufor, i to ona
+  odpowiada bankowemu DSCR.
+
+Przy racie wymierzonej na pokrycie bankowe 1,20 pierwszy wskaźnik wychodzi około
+1,09. Zamiana ich miejscami przewróciłaby werdykt testu 2, dlatego arkusz
+i interfejs pokazują obie pod pełnymi nazwami — słowo „DSCR" bez dopowiedzenia
+zostało z nich usunięte.
+
+### 18.5. Na którym roku liczony jest udźwig
+
+Na **najgorszym roku okresu kredytowania**, nie na pierwszym i nie na średniej —
+`min(pulapy)` po wszystkich latach kredytu. Przy czynszu i kosztach indeksowanych
+różnymi stawkami te trzy wielkości się rozjeżdżają, a bank patrzy na rok
+najgorszy.
+
+Przy okazji naprawiono błąd, który ten wybór wcześniej unieważniał: projekcja
+bez kredytu idzie ścieżką grantową, czyli 25 lat, więc lata 26–30 nie były
+w ogóle badane. Przy kosztach indeksowanych szybciej od czynszu to właśnie one
+są najciaśniejsze. Silnik wymusza teraz horyzont równy okresowi kredytu
+(`projekcja.build(..., horyzont_spoleczna=...)`). W scenariuszu odniesienia
+(koszty 3,5%, czynsz 3,0%) nie zmienia to nic, bo wiążący rok mieści się
+w dwudziestu pięciu; przy indeksacji kosztów 4,5% wobec czynszu 2,0% kredyt
+spada z 5 968 765 zł na 5 485 629 zł.
+
+### 18.6. Pytanie do BGK
+
+> Jakiego minimalnego wskaźnika pokrycia obsługi długu wymaga BGK przy
+> finansowaniu zwrotnym w programie SBC? Czy wskaźnik liczony jest od nadwyżki
+> operacyjnej do raty, czy inaczej, i na którym roku projekcji — pierwszym pełnym,
+> średniej, czy najgorszym?

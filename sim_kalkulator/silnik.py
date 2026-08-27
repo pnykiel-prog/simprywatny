@@ -54,6 +54,12 @@ def kredyt_maksymalny_obslugiwalny(
     kosztow biezacych i dalby pokrycie ponizej jednosci, czyli dokladnie
     odwrotnie niz zapowiada rozdzial 2.2.
 
+    Nadwyzka operacyjna nie idzie na rate w calosci. Pakiet naprawczy nr 2,
+    rozdz. 1: przy pokryciu dokladnie 1,0 pierwsze odchylenie od zalozen daje
+    niedobor na racie, wiec nadwyzka jest dzielona przez minimalny wskaznik
+    pokrycia obslugi dlugu. Wskaznik jest zalozeniem podanym na wejsciu, nie
+    odczytem z przepisu — patrz `prawo.WSKAZNIK_POKRYCIA_OBSLUGI_DLUGU_DOMYSLNY`.
+
     Kwota jest ograniczona z dwoch stron. Od gory ustawowym udzialem 80%
     (art. 15b ust. 2 ustawy z 26.10.1995) oraz tym, ile kredytu w ogole
     potrzeba: dotacja i partycypacja pokrywaja czesc kosztow, a nikt nie
@@ -78,7 +84,14 @@ def kredyt_maksymalny_obslugiwalny(
     # Projekcja bez kredytu daje przychody i koszty biezace — obie wielkosci
     # nie zaleza od kwoty kredytu, wiec wystarczy policzyc je raz.
     bez_kredytu = _projekcja.zbuduj_finansowanie(w, a, g, kwota_kredytu=ZERO)
-    proj = _projekcja.build(w, a, bez_kredytu, limity_s, limity_k)
+    # Horyzont wymuszony na okres kredytu. Bez tego projekcja bez kredytu idzie
+    # sciezka grantowa (25 lat), a udzwig bylby liczony z pominieciem lat 26-30
+    # — czyli tych, ktore przy kosztach rosnacych szybciej od czynszu sa
+    # najciasniejsze. Kredyt wychodzilby wtedy za duzy, a pokrycie w ostatnich
+    # latach spadaloby ponizej zadanego bufora.
+    proj = _projekcja.build(
+        w, a, bez_kredytu, limity_s, limity_k, horyzont_spoleczna=k.okres_lat
+    )
 
     # Rata przypadajaca na zlotowke kredytu, osobno w karencji i po niej.
     if k.oprocentowanie == ZERO:
@@ -87,13 +100,15 @@ def kredyt_maksymalny_obslugiwalny(
         czynnik = (JEDEN + k.oprocentowanie) ** okresy_splaty
         annuita_jednostkowa = k.oprocentowanie * czynnik / (czynnik - JEDEN)
 
+    bufor = w.parametry_zewnetrzne.minimalny_wskaznik_pokrycia_obslugi_dlugu
     pulapy = []
     for rok in proj.spoleczna.lata:
         if rok.rok > k.okres_lat:
             continue                       # po splacie kredyt nie obciaza juz przeplywu
-        dostepne_na_rate = rok.przychod_czynszowy_netto - rok.koszty_operacyjne
-        if dostepne_na_rate <= ZERO:
+        nadwyzka = rok.przychod_czynszowy_netto - rok.koszty_operacyjne
+        if nadwyzka <= ZERO:
             return ZERO                    # czynsz nie pokrywa nawet kosztow biezacych
+        dostepne_na_rate = nadwyzka / bufor
         wspolczynnik = (
             k.oprocentowanie if rok.rok <= k.karencja_lat else annuita_jednostkowa
         )
@@ -146,6 +161,10 @@ def czynsz_domykajacy_bez_wkladu(
     warunek pokrycia w kazdym roku daje minimalna stawke dla tego roku;
     wiazaca jest najwieksza z nich.
 
+    Bufor obslugi dlugu wchodzi tu tym samym wskaznikiem, co przy wymiarowaniu
+    kredytu — inaczej obie funkcje opisywalyby dwa rozne banki i stawka
+    domykajaca nie domykalaby kwoty, ktora silnik faktycznie przyjmuje.
+
     Zwraca None, gdy zadna stawka nie wystarczy — na przyklad gdy potrzebny
     kredyt przekracza ustawowe 80% kosztow.
     """
@@ -168,7 +187,9 @@ def czynsz_domykajacy_bez_wkladu(
         w, pula_spoleczna=replace(w.pula_spoleczna, czynsz_zakladany_m2_mies=JEDEN)
     )
     fin = _projekcja.zbuduj_finansowanie(jednostkowe, a, g, kwota_kredytu=ZERO)
-    proj = _projekcja.build(jednostkowe, a, fin, limity_s, limity_k)
+    proj = _projekcja.build(
+        jednostkowe, a, fin, limity_s, limity_k, horyzont_spoleczna=k.okres_lat
+    )
 
     if k.oprocentowanie == ZERO:
         annuita_jednostkowa = JEDEN / Decimal(okresy_splaty)
@@ -176,6 +197,7 @@ def czynsz_domykajacy_bez_wkladu(
         czynnik = (JEDEN + k.oprocentowanie) ** okresy_splaty
         annuita_jednostkowa = k.oprocentowanie * czynnik / (czynnik - JEDEN)
 
+    bufor = w.parametry_zewnetrzne.minimalny_wskaznik_pokrycia_obslugi_dlugu
     stawki = []
     for rok in proj.spoleczna.lata:
         if rok.rok > k.okres_lat:
@@ -186,7 +208,9 @@ def czynsz_domykajacy_bez_wkladu(
         wspolczynnik = (
             k.oprocentowanie if rok.rok <= k.karencja_lat else annuita_jednostkowa
         )
-        potrzebny_przychod = rok.koszty_operacyjne + kredyt_potrzebny * wspolczynnik
+        potrzebny_przychod = (
+            rok.koszty_operacyjne + kredyt_potrzebny * wspolczynnik * bufor
+        )
         stawki.append(potrzebny_przychod / przychod_na_zlotowke)
     return max(stawki) if stawki else None
 
