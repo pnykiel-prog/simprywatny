@@ -389,7 +389,14 @@ function wgFormatu(f, v){
 /* ---------- pomocnicze SVG ---------- */
 function el(nazwa, atrybuty, tresc){
   const e = document.createElementNS(NS, nazwa);
-  for (const [k,v] of Object.entries(atrybuty||{})) if (v != null) e.setAttribute(k, v);
+  const a = atrybuty || {};
+  for (const [k,v] of Object.entries(a)) if (v != null) e.setAttribute(k, v);
+  // Reguła CSS bije atrybut prezentacyjny, więc `.os{fill:...}` zjadał każdy
+  // kolor podany przy tworzeniu elementu — wszystkie etykiety wychodziły szare,
+  // niezależnie od tego, co miały oznaczać. Kolor podany razem z klasą idzie
+  // więc do stylu, który wygrywa. Dotyczy wyłącznie elementów z klasą; przy
+  // gołych kształtach atrybut i tak nie ma z czym przegrać.
+  if (a.class && a.fill != null) e.style.fill = a.fill;
   if (tresc != null) e.textContent = tresc;
   return e;
 }
@@ -637,14 +644,44 @@ function rysujNegocjacje(s, biezacyUdzial){
    Dwa wiersze na wspólnej skali. Pytanie brzmi: czy podłoga mieści się pod
    najniższym z sufitów. Sufit rynkowy dotyczy wyłącznie puli społecznej —
    w komunalnej najemcą jest gmina. */
+/* Rozkłada etykiety pionowych znaczników na pasy, żeby się nie nakładały.
+
+   Znaczników bywa cztery — limit ustawowy, próg z tabeli art. 7c, stawka rynkowa
+   i próg bezskuteczności — a przy zbliżonych stawkach ich podpisy lądują jeden na
+   drugim i wykres przestaje cokolwiek mówić. Zachłanne przydzielanie pasów:
+   każdy podpis idzie na pierwszy pas, w którym nic go nie dotyka. */
+function rozlozEtykiety(znaczniki, W){
+  const SZEROKOSC_ZNAKU = 5.1;   // przybliżenie dla klasy .os (10 px)
+  const ODSTEP = 6;
+  const pasy = [];
+  return znaczniki.slice().sort((a, b) => a.x - b.x).map((z) => {
+    const pol = z.tekst.length * SZEROKOSC_ZNAKU / 2;
+    // Podpis przy krawędzi kotwiczy się do niej, zamiast wystawać poza wykres.
+    let kotwica = "middle", xt = z.x;
+    if (z.x - pol < 2){ kotwica = "start"; xt = 2; }
+    else if (z.x + pol > W - 2){ kotwica = "end"; xt = W - 2; }
+    const od = kotwica === "start" ? xt : kotwica === "end" ? xt - 2*pol : z.x - pol;
+    const doX = od + 2*pol;
+    let pas = 0;
+    for (;;){
+      const zajete = pasy[pas] || (pasy[pas] = []);
+      if (!zajete.some(([a, b]) => od - ODSTEP < b && doX + ODSTEP > a)){
+        zajete.push([od, doX]);
+        return {...z, pas, xt, kotwica};
+      }
+      pas++;
+    }
+  });
+}
+
 function rysujCzynsz(c){
   const svg = $("#w-czynsz"); czysc(svg);
-  const W = 620, L = 150, R = 84, GORA = 26, WYS_W = 62;
+  const W = 620, L = 150, R = 84, GORA = 16;
+  const WYS_SLUPKOW = 44, WYS_PASA = 13, ODSTEP_WIERSZY = 16;
   const wiersze = c.wiersze || [];
-  const H = Math.max(120, GORA + wiersze.length * WYS_W + 46);
-  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
   if (!wiersze.length){
-    svg.appendChild(el("text", {x:W/2, y:H/2, "text-anchor":"middle", class:"os"},
+    svg.setAttribute("viewBox", `0 0 ${W} 120`);
+    svg.appendChild(el("text", {x:W/2, y:60, "text-anchor":"middle", class:"os"},
       "Brak aktywnej puli."));
     $("#p-czynsz").textContent = c.zdanie || "";
     return;
@@ -660,19 +697,65 @@ function rysujCzynsz(c){
   const maks = Math.max(...wartosci) * 1.12 || 1;
   const x = (v) => L + (W-L-R) * (v/maks);
 
-  wiersze.forEach((w, i) => {
-    const gora = GORA + i*WYS_W;
+  // Pierwsze przejście — układ znaczników, żeby znać wysokość każdego wiersza.
+  // Wiersz z czterema podpisami na trzech pasach jest wyższy od takiego z jednym;
+  // stała wysokość albo tłoczyłaby jeden, albo zostawiała puste miejsce w drugim.
+  const uklady = wiersze.map((w) => {
+    const znaczniki = [{
+      x: x(w.limit), tekst: "limit " + zl2(w.limit), kolor: "var(--tekst)",
+      styl: {"stroke-width": 2}, opis: "Limit ustawowy: " + zl2(w.limit) + " zł/m²/mies.",
+    }];
+    if (w.prog_sasiedni) znaczniki.push({
+      x: x(w.prog_sasiedni.limit_po_progu),
+      tekst: "po progu " + zl2(w.prog_sasiedni.limit_po_progu),
+      kolor: "var(--uwaga)", styl: {"stroke-width": 2, "stroke-dasharray": "2 3"},
+      opis: w.prog_sasiedni.opis,
+    });
+    if (prog && prog.pula === w.pula && prog.stawka != null) znaczniki.push({
+      x: x(prog.stawka), tekst: "bez efektu " + zl2(prog.stawka),
+      kolor: "var(--neutral)", styl: {"stroke-width": 2, "stroke-dasharray": "1 3"},
+      opis: prog.opis, kropka: true,
+    });
+    if (w.rynkowy != null) znaczniki.push({
+      x: x(w.rynkowy), tekst: "rynek " + zl2(w.rynkowy), kolor: "var(--s2)",
+      styl: {"stroke-width": 2, "stroke-dasharray": "5 3"},
+      opis: "Stawka akceptowana przez rynek: " + zl2(w.rynkowy) + " zł/m²/mies.",
+    });
+    const rozlozone = rozlozEtykiety(znaczniki, W);
+    const pasow = rozlozone.reduce((n, z) => Math.max(n, z.pas + 1), 1);
+    return {wiersz: w, znaczniki: rozlozone, pasow};
+  });
+
+  const wysokosc = (u) => WYS_SLUPKOW + u.pasow * WYS_PASA + ODSTEP_WIERSZY;
+  const H = GORA + uklady.reduce((suma, u) => suma + wysokosc(u), 0) + 6;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+
+  let gora = GORA;
+  uklady.forEach((u) => {
+    const w = u.wiersz;
+    // Etykiety liczbowe przy słupkach uciekają do środka, gdy pionowy znacznik
+    // stoi zaraz za końcem słupka — inaczej liczba wchodzi na kreskę.
+    const pionowe = u.znaczniki.map(z => z.x);
+    const zaSlupkiem = (xk) => !pionowe.some(xp => xp > xk && xp - xk < 46);
+
     svg.appendChild(el("text", {x:L-10, y:gora+15, "text-anchor":"end",
       class:"etykieta-serii", fill:"var(--tekst)"}, w.etykieta));
 
     // słupek wypełniony — czynsz przyjęty w modelu
+    const xp = x(w.przyjety);
     const gp = el("g", {});
-    gp.appendChild(el("rect", {x:L, y:gora+4, width:Math.max(2, x(w.przyjety)-L), height:15,
+    gp.appendChild(el("rect", {x:L, y:gora+4, width:Math.max(2, xp-L), height:15,
       rx:3, fill:"var(--s1)"}));
     tytulHover(gp, "Czynsz przyjęty w modelu: " + zl2(w.przyjety) + " zł/m²/mies.");
     svg.appendChild(gp);
-    svg.appendChild(el("text", {x:x(w.przyjety)+6, y:gora+16, class:"os",
-      fill:"var(--tekst-2)"}, zl2(w.przyjety)));
+    // Etykieta chowa się do wnętrza słupka tylko wtedy, gdy się tam mieści.
+    // Na wypełnionym słupku jest biała — kolor karty znikałby w ciemnym motywie.
+    const luznoP = zaSlupkiem(xp) || xp - L < 44;
+    svg.appendChild(el("text", {
+      x: luznoP ? xp + 6 : xp - 6, y: gora + 16, class: "os",
+      fill: luznoP ? "var(--tekst-2)" : "#fff",
+      "text-anchor": luznoP ? "start" : "end",
+    }, zl2(w.przyjety)));
 
     // słupek konturowy — czynsz wymagany, czyli podłoga
     const gw = el("g", {});
@@ -681,13 +764,10 @@ function rysujCzynsz(c){
       const xw = x(w.wymagany);
       gw.appendChild(el("rect", {x:L, y:gora+24, width:Math.max(2, xw-L), height:15,
         rx:3, fill:"none", stroke:kolor, "stroke-width":2, "stroke-dasharray":"1 0"}));
-      // Etykieta ląduje za słupkiem, chyba że wpadłaby na pionowy znacznik
-      // sufitu — wtedy chowa się do wnętrza słupka.
-      const pionowe = [x(w.limit)].concat(w.rynkowy != null ? [x(w.rynkowy)] : []);
-      const koliduje = pionowe.some(xp => xp > xw && xp - xw < 44);
+      const luznoW = zaSlupkiem(xw) || xw - L < 44;
       svg.appendChild(el("text", {
-        x: koliduje ? xw - 6 : xw + 6, y: gora + 36, class: "os", fill: kolor,
-        "text-anchor": koliduje ? "end" : "start",
+        x: luznoW ? xw + 6 : xw - 6, y: gora + 36, class: "os", fill: kolor,
+        "text-anchor": luznoW ? "start" : "end",
       }, zl2(w.wymagany)));
       tytulHover(gw, (w.pula === "spoleczna"
         ? "Czynsz, przy którym kredyt uniósłby lukę kapitałową tej puli: "
@@ -699,53 +779,20 @@ function rysujCzynsz(c){
     }
     svg.appendChild(gw);
 
-    // pionowy znacznik — limit ustawowy
-    const xl = x(w.limit);
-    svg.appendChild(el("line", {x1:xl, y1:gora, x2:xl, y2:gora+44,
-      stroke:"var(--tekst)", "stroke-width":2}));
-    svg.appendChild(el("text", {x:xl, y:gora+56, "text-anchor":"middle", class:"os"},
-      "limit " + zl2(w.limit)));
+    // pionowe znaczniki wraz z podpisami na przydzielonych pasach
+    u.znaczniki.forEach((z) => {
+      const dol = gora + WYS_SLUPKOW + z.pas * WYS_PASA;
+      const g = el("g", {});
+      g.appendChild(el("line", Object.assign(
+        {x1:z.x, y1:gora + 2, x2:z.x, y2:dol, stroke:z.kolor}, z.styl)));
+      if (z.kropka) g.appendChild(el("circle", {cx:z.x, cy:gora+2, r:3, fill:z.kolor}));
+      g.appendChild(el("text", {x:z.xt, y:dol + 10, "text-anchor":z.kotwica,
+        class:"os", fill:z.kolor}, z.tekst));
+      tytulHover(g, z.opis);
+      svg.appendChild(g);
+    });
 
-    // Skok limitu tuż obok — tabela art. 7c działa progowo, a różnica kilkunastu
-    // procent stawki bierze się z ułamka punktu procentowego dotacji.
-    if (w.prog_sasiedni){
-      const xp = x(w.prog_sasiedni.limit_po_progu);
-      const gp2 = el("g", {});
-      gp2.appendChild(el("line", {x1:xp, y1:gora+2, x2:xp, y2:gora+42,
-        stroke:"var(--uwaga)", "stroke-width":2, "stroke-dasharray":"2 3"}));
-      tytulHover(gp2, w.prog_sasiedni.opis);
-      svg.appendChild(gp2);
-      // Próg sąsiedni bywa tuż obok limitu — wtedy podpis schodzi o wiersz niżej,
-      // żeby obie liczby dały się przeczytać.
-      const blisko = Math.abs(xp - x(w.limit)) < 78;
-      svg.appendChild(el("text", {x:xp, y:gora + (blisko ? 68 : 56), "text-anchor":"middle",
-        class:"os", fill:"var(--uwaga)"},
-        "po progu " + zl2(w.prog_sasiedni.limit_po_progu)));
-    }
-
-    // Trzeci znacznik — próg bezskuteczności. Powyżej tej stawki czynsz
-    // przestaje obniżać wkład własny, bo kredytu ogranicza już coś innego.
-    if (prog && prog.pula === w.pula && prog.stawka != null){
-      const xb = x(prog.stawka);
-      const gb = el("g", {});
-      gb.appendChild(el("line", {x1:xb, y1:gora+2, x2:xb, y2:gora+42,
-        stroke:"var(--neutral)", "stroke-width":2, "stroke-dasharray":"1 3"}));
-      gb.appendChild(el("circle", {cx:xb, cy:gora+2, r:3, fill:"var(--neutral)"}));
-      tytulHover(gb, prog.opis);
-      svg.appendChild(gb);
-      if (i === 0)
-        svg.appendChild(el("text", {x:xb, y:gora-4, "text-anchor":"middle", class:"os",
-          fill:"var(--neutral)"}, "bez efektu od " + zl2(prog.stawka)));
-    }
-
-    // linia przerywana — stawka rynkowa; tylko wiersz społeczny może ją mieć
-    if (w.rynkowy != null){
-      const xr = x(w.rynkowy);
-      svg.appendChild(el("line", {x1:xr, y1:gora, x2:xr, y2:gora+44,
-        stroke:"var(--s2)", "stroke-width":2, "stroke-dasharray":"5 3"}));
-      svg.appendChild(el("text", {x:xr, y:gora+56, "text-anchor":"middle", class:"os",
-        fill:"var(--s2)"}, "rynek " + zl2(w.rynkowy)));
-    }
+    gora += wysokosc(u);
   });
 
   // Gdy stawki rynkowej nie podano — trzecie miejsce zostaje puste i zadaje pytanie,

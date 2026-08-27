@@ -500,6 +500,63 @@ class TestRynek_WarstwaInterakcji:
         assert bledy == [], bledy[:3]
 
     @pytest.mark.wolne
+    def test_zadne_dwie_etykiety_wykresu_czynszowego_sie_nie_nakladaja(self, strona):
+        """Cztery pionowe znaczniki potrafia wypasc blisko siebie i wtedy ich
+        podpisy ladowaly jeden na drugim — liczby stawaly sie nieczytelne.
+        Test mierzy faktyczne prostokaty tekstu w przegladarce, bo tylko one
+        mowia, czy uklad sie zmiescil."""
+        p, bledy = strona
+        # Wariant scisniety: stawka rynkowa tuz przy progu z tabeli art. 7c,
+        # a prog bezskutecznosci miedzy czynszem przyjetym a limitem.
+        p.evaluate(
+            """async () => {
+                Object.assign(zmiany, {
+                    "pula_spoleczna.czynsz_zakladany_m2_mies": 25.5,
+                    "rynek.czynsz_rynkowy_m2_mies": 28.0,
+                    "rynek.zrodlo": "mediana z ofert",
+                });
+                await przelicz();
+            }"""
+        )
+        p.wait_for_timeout(2500)
+        prostokaty = p.evaluate(
+            """() => Array.from(document.querySelectorAll('#w-czynsz text'))
+                .map(e => {
+                  const b = e.getBBox();
+                  return {t: e.textContent, x: b.x, y: b.y, w: b.width, h: b.height};
+                })"""
+        )
+        assert len(prostokaty) >= 6, prostokaty
+        for i, a in enumerate(prostokaty):
+            for b in prostokaty[i + 1:]:
+                nachodzi = (
+                    a["x"] < b["x"] + b["w"] and b["x"] < a["x"] + a["w"]
+                    and a["y"] < b["y"] + b["h"] and b["y"] < a["y"] + a["h"]
+                )
+                assert not nachodzi, f"Etykiety nachodza na siebie: {a['t']!r} i {b['t']!r}"
+        assert bledy == [], bledy[:3]
+
+    @pytest.mark.wolne
+    def test_kolor_etykiety_nie_jest_zjadany_przez_klase(self, strona):
+        """Regula CSS bije atrybut prezentacyjny, wiec `.os{fill:...}` zjadal
+        kazdy kolor podany przy tworzeniu elementu i wszystkie podpisy wychodzily
+        szare — niezaleznie od tego, co mialy oznaczac."""
+        p, _ = strona
+        kolory = p.evaluate(
+            """() => Array.from(document.querySelectorAll('#w-czynsz text'))
+                .filter(e => e.getAttribute('fill'))
+                .map(e => [e.textContent, e.getAttribute('fill'),
+                           getComputedStyle(e).fill])"""
+        )
+        assert kolory, "wykres czynszowy nie ma ani jednej kolorowanej etykiety"
+        rozne = {wyliczony for _, _, wyliczony in kolory}
+        assert len(rozne) > 1, f"wszystkie etykiety w jednym kolorze: {rozne}"
+        # Podpis limitu ma byc w kolorze tekstu glownego, a nie w szarosci `.os`.
+        limit = next((k for k in kolory if k[0].startswith("limit")), None)
+        assert limit is not None
+        assert limit[2] != "rgb(122, 121, 117)", limit
+
+    @pytest.mark.wolne
     def test_stawka_bez_zrodla_prosi_zamiast_wyrzucac_blad(self, strona):
         p, bledy = strona
         p.fill("#p-rynek\\.czynsz_rynkowy_m2_mies", "26")
