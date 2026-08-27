@@ -25,6 +25,7 @@ import yaml
 from . import arkusz as _arkusz
 from . import prawo
 from . import silnik as _silnik
+from . import zalozenia as _zalozenia
 from . import wrazliwosc as _wrazliwosc
 from .dane import BladObliczenia, BladWalidacji, FormaGruntu, TrybKredytu, zbuduj
 from .silnik import Wynik, przelicz
@@ -1222,6 +1223,10 @@ def zakresy_json(r: Wynik) -> Dict[str, Any]:
                       "arkusza i do nazwy zapisywanego zestawu założeń. Narzędzie nie "
                       "wyprowadza z nich żadnej wartości.",
         },
+        # Katalog zalozen — pakiet nr 2, rozdz. 7. W wyniku widac tylko te, ktore
+        # w danym scenariuszu zadzialaly; lista pelna mowi takze o tych, ktore
+        # zadzialaja przy innych ustawieniach, i gdzie siedzi ich przelacznik.
+        "zalozenia": _katalog_zalozen(r),
         "parametry_rynkowe": {
             "data": w.parametry_zewnetrzne.data_parametrow.isoformat(),
             "przeterminowane": any(
@@ -1258,6 +1263,33 @@ def zakresy_json(r: Wynik) -> Dict[str, Any]:
             ],
         },
     }
+
+
+def _katalog_zalozen(r: Wynik) -> list:
+    """Wszystkie zalozenia modelu, z zaznaczeniem tych aktywnych w tym wariancie.
+
+    `aktywne` znaczy: w tym scenariuszu zalozenie faktycznie wplywa na wynik
+    i silnik zglosil je ostrzezeniem. Reszta czeka na scenariusz, w ktorym
+    zacznie wiazac — i ma byc widoczna zawczasu, bo to ona decyduje, o co
+    zapytac Bank przed naborem, a nie po.
+    """
+    aktywne = {o.kod for o in r.ostrzezenia}
+    return [
+        {
+            "kod": z.kod,
+            "tytul": z.tytul,
+            "sciezka": z.sciezka,
+            "ma_przelacznik": z.ma_przelacznik,
+            "domyslnie": z.domyslnie,
+            "alternatywa": z.alternatywa,
+            "podstawa": z.podstawa,
+            "pytanie_do_bgk": z.pytanie_do_bgk,
+            "waga_dla_wyniku": z.waga_dla_wyniku,
+            "priorytet": z.priorytet,
+            "aktywne": z.kod in aktywne,
+        }
+        for z in _zalozenia.wedlug_priorytetu()
+    ]
 
 
 def _dzwignia_poza_osia(w, numer: Optional[int]) -> Dict[str, Any]:

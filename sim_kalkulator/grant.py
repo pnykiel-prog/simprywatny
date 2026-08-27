@@ -86,28 +86,12 @@ def _grant_spoleczny(w: Wejscie, pula: PulaKosztow, ostrzezenia: List[Ostrzezeni
 
     bonus = w.pula_spoleczna.bonus_rewitalizacyjny and not w.pula_spoleczna.kredyt.aktywny
     stawka = prawo.GRANT_SPOLECZNY_LIMIT_PODSTAWOWY
+    prog_gruntowy = prawo.GRANT_SPOLECZNY_PROG_GRUNTOWY
     if bonus:
         # art. 13 ust. 4 — +5 pp; wylaczony przy finansowaniu zwrotnym (walidacja w dane.py).
         stawka += prawo.BONUS_REWITALIZACYJNY_PP
-        ostrzezenia.append(
-            Ostrzezenie(
-                kod="ZALOZENIE_BONUS_A_PROG_GRUNTOWY",
-                tresc=(
-                    "Bonus +5 pp zastosowany w puli spolecznej. Przyjeto, ze bonus podnosi "
-                    "wylacznie limit gorny, a prog gruntowy pozostaje na poziomie "
-                    f"{prawo.GRANT_SPOLECZNY_PROG_GRUNTOWY:.0%}. Odczyt alternatywny podnosilby "
-                    "oba progi o 5 pp i dawal wyzszy grant przy skromnym gruncie. "
-                    "ZALOZENIE do potwierdzenia w BGK — patrz LUKI.md."
-                ),
-                podstawa="art. 13 ust. 1 pkt 1 w zw. z art. 13 ust. 4 ustawy z 8.12.2006",
-            
-                tresc_potoczna=(
-                    "Dodatkowe 5% dotacji naliczono przy założeniu, że nie podnosi ono progu "
-                    "gruntowego. Odczyt alternatywny dałby wyższą dotację — do potwierdzenia w Banku."
-                ),
-                waga=Waga.ZMIENIA_KWOTE,
-            )
-        )
+        if w.przelaczniki.bonus_podnosi_prog_gruntowy:
+            prog_gruntowy += prawo.BONUS_REWITALIZACYJNY_PP
 
     # Kanal A. art. 13 ust. 1 pkt 1 pokrywa czesc ponad prog gruntowy wylacznie
     # do wysokosci wartosci prawa wlasnosci albo uzytkowania wieczystego gruntu
@@ -117,9 +101,40 @@ def _grant_spoleczny(w: Wejscie, pula: PulaKosztow, ostrzezenia: List[Ostrzezeni
     pasmo_45 = w.grunt.forma.daje_pasmo_45
     grunt_wliczany = pula.grunt_do_pasma_w_podstawie if pasmo_45 else ZERO
     limit_gorny = koszty * stawka
-    limit_gruntowy = koszty * prawo.GRANT_SPOLECZNY_PROG_GRUNTOWY + grunt_wliczany
+    limit_gruntowy = koszty * prog_gruntowy + grunt_wliczany
 
     kwota = min(limit_gorny, limit_gruntowy)
+    if bonus:
+        # Odczyt alternatywny: bonus przesuwa TAKZE prog gruntowy. Roznica jest
+        # zerowa, gdy wiaze limit gorny, i dodatnia, gdy wiaze prog gruntowy.
+        prog_alternatywny = (
+            prawo.GRANT_SPOLECZNY_PROG_GRUNTOWY
+            if w.przelaczniki.bonus_podnosi_prog_gruntowy
+            else prawo.GRANT_SPOLECZNY_PROG_GRUNTOWY + prawo.BONUS_REWITALIZACYJNY_PP
+        )
+        kwota_alternatywna = min(limit_gorny, koszty * prog_alternatywny + grunt_wliczany)
+        ostrzezenia.append(
+            Ostrzezenie(
+                kod="ZALOZENIE_BONUS_A_PROG_GRUNTOWY",
+                tresc=(
+                    f"Bonus +{prawo.BONUS_REWITALIZACYJNY_PP:.0%} zastosowany w puli spolecznej. "
+                    f"Przyjeto, ze bonus podnosi prog gruntowy: "
+                    f"{'TAK' if w.przelaczniki.bonus_podnosi_prog_gruntowy else 'NIE'} — "
+                    f"prog wynosi {prog_gruntowy:.0%}. Odczyt alternatywny "
+                    f"({prog_alternatywny:.0%}) dalby dotacje {kwota_alternatywna:.2f} zl "
+                    f"zamiast {kwota:.2f} zl, czyli roznice {abs(kwota_alternatywna - kwota):.2f} zl. "
+                    "ZALOZENIE do potwierdzenia w BGK — patrz LUKI.md."
+                ),
+                podstawa="art. 13 ust. 1 pkt 1 w zw. z art. 13 ust. 4 ustawy z 8.12.2006",
+                tresc_potoczna=(
+                    "Dodatkowe 5% dotacji naliczono przy założeniu o progu gruntowym. "
+                    f"Przy odczycie przeciwnym dotacja byłaby o "
+                    f"{abs(kwota_alternatywna - kwota):,.0f} zł inna — do potwierdzenia w Banku."
+                    .replace(",", " ")
+                ),
+                waga=Waga.ZMIENIA_KWOTE,
+            )
+        )
     return GrantPuli(
         nazwa="spoleczna",
         kwota=kwota,

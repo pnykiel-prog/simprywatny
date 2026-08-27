@@ -178,6 +178,10 @@ button.akcja:disabled{opacity:.55;cursor:progress}
 .pole .zastrzezenie{margin-top:6px;font-size:11px;line-height:1.35;
   color:var(--tekst-2);border-top:1px dashed var(--linia-mocna);padding-top:5px}
 .pole.chwiejny{border-style:dashed}
+.zalozenie{padding:7px 0;border-bottom:1px solid var(--linia)}
+.zalozenie:last-child{border-bottom:none}
+.zalozenie .glowa-zalozenia{display:flex;gap:7px;align-items:center;font-size:12.5px}
+.zalozenie.dziala{border-left:3px solid var(--uwaga);padding-left:8px}
 .znacznik-zalozenia{font-size:10px;text-transform:uppercase;letter-spacing:.04em;
   padding:1px 5px;border-radius:3px;background:var(--ostrzezenie-tlo,#fdf3d8);
   color:var(--ostrzezenie-tekst,#7a5c12);vertical-align:middle}
@@ -244,6 +248,13 @@ button.akcja:disabled{opacity:.55;cursor:progress}
         <details id="panel-rynkowy">
           <summary id="panel-rynkowy-tytul">Parametry rynkowe i wskaźniki</summary>
           <div class="pola" id="parametry-rynkowe" style="margin-top:9px"></div>
+        </details>
+      </div>
+
+      <div class="karta">
+        <details id="panel-zalozen">
+          <summary id="panel-zalozen-tytul">Założenia modelu</summary>
+          <div id="zalozenia" style="margin-top:9px"></div>
         </details>
       </div>
     </div>
@@ -1225,6 +1236,30 @@ function rysujPorownanie(p){
   $("#karta-porownania").hidden = false;
 }
 
+/* Katalog założeń — pełna lista, nie tylko te, które w tym wariancie zadziałały.
+   Założenie, które czeka na scenariusz, jest równie warte pytania w Banku jak to,
+   które akurat wiąże; różnica polega tylko na tym, kiedy się o nim dowiesz. */
+function rysujZalozenia(z){
+  const lista = z.zalozenia || [];
+  if (!lista.length){ $("#panel-zalozen").hidden = true; return; }
+  const aktywne = lista.filter(w => w.aktywne).length;
+  $("#panel-zalozen-tytul").textContent =
+    `Założenia modelu — ${aktywne} z ${lista.length} działa w tym wariancie`;
+  $("#zalozenia").innerHTML =
+    `<div class="info">Każde z nich to pytanie do BGK, nie odczyt przepisu. `
+    + `Pełna lista wraz z brzmieniem pytań: PYTANIA_DO_BGK.md w repozytorium.</div>`
+    + lista.map(w => `
+      <div class="zalozenie${w.aktywne ? " dziala" : ""}">
+        <div class="glowa-zalozenia">
+          <b>${w.tytul}</b>
+          ${w.aktywne ? `<span class="znacznik-zalozenia">działa tutaj</span>` : ""}
+        </div>
+        <div class="info">Przyjęto: ${w.domyslnie}</div>
+        <div class="info">Odczyt alternatywny: ${w.alternatywa}</div>
+        <div class="info">Zmienia: ${w.waga_dla_wyniku}</div>
+      </div>`).join("");
+}
+
 function rysujParametryRynkowe(z){
   const r = z.parametry_rynkowe;
   $("#panel-rynkowy-tytul").textContent = r.przeterminowane
@@ -1379,6 +1414,7 @@ $("#btn-arkusz").addEventListener("click", async (ev) => {
     $("#pokretlo").value = Math.round(pokretlo.wartosc * 100);
     rysujPolaLiczbowe(zakresy);
     rysujParametryRynkowe(zakresy);
+    rysujZalozenia(zakresy);
     await przelicz();
     await odswiezSweep();
   }catch(e){ pokazBlad(e.message); }

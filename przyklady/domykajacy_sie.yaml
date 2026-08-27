@@ -138,5 +138,14 @@ przelaczniki:
   # przepis nie rozstrzyga zbiegu. ZALOZENIE — potrafi samo przewrocic werdykt.
   #   nizszy | wyzszy | wedlug_instrumentu_dominujacego
   prog_tolerancji_przy_dwoch_instrumentach: nizszy
+  # Czy bonus +5 pp (art. 13 ust. 4) podnosi TAKZE prog gruntowy, czy tylko
+  # limit gorny. Domyslnie tylko gorny. ZALOZENIE.
+  bonus_podnosi_prog_gruntowy: false
+  # Z ktorej puli pochodza lokale oddawane gminie w trybie "lokal za grunt".
+  # Ustawa nie wskazuje. proporcjonalnie | komunalna | spoleczna. ZALOZENIE.
+  lokale_dla_gminy_z_puli: proporcjonalnie
+  # Dlugosc okresu rozliczeniowego nadwyzki rekompensaty. 1 = kontrola w kazdym
+  # roku, wariant najostrozniejszy; dluzszy daje lagodniejszy wynik. ZALOZENIE.
+  okres_rozliczeniowy_nadwyzki_lat: 1
   metoda_rozsadnego_zysku: kapital_zaangazowany
   remont_i_przebudowa: false

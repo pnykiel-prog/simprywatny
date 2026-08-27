@@ -205,6 +205,20 @@ class RegulaProgu(str, Enum):
     WEDLUG_INSTRUMENTU_DOMINUJACEGO = prawo.REGULA_PROGU_DOMINUJACY
 
 
+class ZrodloLokaliDlaGminy(str, Enum):
+    """Z ktorej puli pochodza lokale oddawane gminie w trybie "lokal za grunt".
+
+    Ustawa z 16.12.2020 (Dz.U. 2021 poz. 223) mowi o przeniesieniu wlasnosci
+    lokali w zamian za grunt, ale nie wskazuje, ktora czesc przedsiewziecia
+    ich dostarcza. Wybor nie jest obojetny: pula, ktora je oddaje, traci
+    powierzchnie przychodowa, zachowujac pelny koszt.
+    """
+
+    PROPORCJONALNIE = prawo.LOKALE_GMINY_PROPORCJONALNIE
+    KOMUNALNA = prawo.LOKALE_GMINY_Z_KOMUNALNEJ
+    SPOLECZNA = prawo.LOKALE_GMINY_ZE_SPOLECZNEJ
+
+
 # ---------------------------------------------------------------------------
 # Warstwa wspolna
 # ---------------------------------------------------------------------------
@@ -463,6 +477,18 @@ class Przelaczniki:
     # Pakiet nr 2, rozdz. 2 — zbieg progow tolerancji w puli laczacej dotacje
     # z kredytem. Domyslnie prog NIZSZY, jako ostrozniejszy. ZALOZENIE.
     prog_tolerancji_przy_dwoch_instrumentach: RegulaProgu = RegulaProgu.NIZSZY
+    # Czy bonus rewitalizacyjny +5 pp podnosi takze prog gruntowy, czy tylko
+    # limit gorny. Domyslnie TYLKO limit gorny — art. 13 ust. 4 mowi o zwiekszeniu
+    # kwoty wsparcia, nie o przesunieciu progu z art. 13 ust. 1 pkt 1. ZALOZENIE.
+    bonus_podnosi_prog_gruntowy: bool = False
+    # Z ktorej puli pochodza lokale oddawane gminie. Domyslnie proporcjonalnie
+    # kluczem PUM — ustawa nie wskazuje puli. ZALOZENIE.
+    lokale_dla_gminy_z_puli: ZrodloLokaliDlaGminy = ZrodloLokaliDlaGminy.PROPORCJONALNIE
+    # Dlugosc okresu rozliczeniowego nadwyzki rekompensaty w latach. Domyslnie 1 —
+    # najgestsza siatka, jaka model potrafi zbudowac, czyli wariant najostrozniejszy.
+    # Przepis odnosi prog do "okresu rozliczeniowego", nie podajac jego dlugosci.
+    # ZALOZENIE do potwierdzenia w BGK.
+    okres_rozliczeniowy_nadwyzki_lat: int = 1
 
 
 @dataclass(frozen=True)
@@ -834,6 +860,23 @@ def zbuduj(dane: Mapping[str, Any], na_dzien: Optional[_dt.date] = None) -> Wejs
             f"'przelaczniki.prog_tolerancji_przy_dwoch_instrumentach' ma nieznana wartosc "
             f"{regula_surowa!r}. Dozwolone: {dozwolone}."
         ) from exc
+    zrodlo_surowe = spr.get(
+        "lokale_dla_gminy_z_puli", ZrodloLokaliDlaGminy.PROPORCJONALNIE.value
+    )
+    try:
+        zrodlo_lokali = ZrodloLokaliDlaGminy(zrodlo_surowe)
+    except ValueError as exc:
+        dozwolone = ", ".join(z.value for z in ZrodloLokaliDlaGminy)
+        raise BladWalidacji(
+            f"'przelaczniki.lokale_dla_gminy_z_puli' ma nieznana wartosc "
+            f"{zrodlo_surowe!r}. Dozwolone: {dozwolone}."
+        ) from exc
+    okres_rozliczeniowy = int(spr.get("okres_rozliczeniowy_nadwyzki_lat", 1) or 1)
+    if okres_rozliczeniowy < 1:
+        raise BladWalidacji(
+            "'przelaczniki.okres_rozliczeniowy_nadwyzki_lat' musi byc dodatnia liczba lat, "
+            f"jest {okres_rozliczeniowy}."
+        )
     przelaczniki = Przelaczniki(
         hybryda_jako_jedno_przedsiewziecie=bool(
             spr.get("hybryda_jako_jedno_przedsiewziecie", False)
@@ -855,6 +898,9 @@ def zbuduj(dane: Mapping[str, Any], na_dzien: Optional[_dt.date] = None) -> Wejs
             spr.get("pustostany_takze_w_puli_komunalnej", False)
         ),
         prog_tolerancji_przy_dwoch_instrumentach=regula_progu,
+        bonus_podnosi_prog_gruntowy=bool(spr.get("bonus_podnosi_prog_gruntowy", False)),
+        lokale_dla_gminy_z_puli=zrodlo_lokali,
+        okres_rozliczeniowy_nadwyzki_lat=okres_rozliczeniowy,
     )
 
     wejscie = Wejscie(

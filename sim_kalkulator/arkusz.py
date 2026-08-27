@@ -27,6 +27,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
 from . import prawo
+from . import zalozenia as _katalog_zalozen
 from .dane import (
     FormaGruntu,
     MetodaRozsadnegoZysku,
@@ -432,6 +433,53 @@ def _zalozenia(wb: Workbook, wynik: Wynik, rej: Rejestr) -> None:
             zrodlo="Brak wzoru w specyfikacji. Wartosc opisowa.",
             podstawa="§ 6 ust. 5 rozp. 1897; § 12 ust. 10 rozp. 766",
             format_liczby=TEKST, zolte=True)
+    wejscie("sw_prog_dwa", "Prog tolerancji przy dotacji i kredycie naraz",
+            pzz.prog_tolerancji_przy_dwoch_instrumentach.value, "",
+            zrodlo="Domyslnie 'nizszy' (10%). ZALOZENIE — odwraca werdykt testu 3. "
+                   "Wartosc opisowa; prog liczbowy jest w zakladce Rekompensata.",
+            podstawa="§ 7 ust. 9 rozp. 1897; § 13 ust. 8 rozp. 766 — zbieg nierozstrzygniety",
+            format_liczby=TEKST, zolte=True)
+    wejscie("sw_okres_rozliczeniowy", "Okres rozliczeniowy nadwyzki (lata)",
+            pzz.okres_rozliczeniowy_nadwyzki_lat, "lata",
+            zrodlo="Domyslnie 1 — kontrola w kazdym roku, wariant najostrozniejszy. "
+                   "Dluzszy okres daje rzadsza siatke i lagodniejszy wynik. ZALOZENIE.",
+            podstawa="§ 7 ust. 9 rozp. 1897; § 13 ust. 8 rozp. 766",
+            format_liczby="0", zolte=True)
+    wejscie("sw_bonus_prog", "Bonus +5 pp podnosi takze prog gruntowy",
+            pzz.bonus_podnosi_prog_gruntowy, "TRUE/FALSE",
+            zrodlo="Domyslnie FALSE — bonus podnosi wylacznie limit gorny. ZALOZENIE.",
+            podstawa="art. 13 ust. 1 pkt 1 w zw. z art. 13 ust. 4 ustawy z 8.12.2006",
+            format_liczby=TEKST, zolte=True)
+    wejscie("sw_lokale_z_puli", "Lokale dla gminy pochodza z puli",
+            pzz.lokale_dla_gminy_z_puli.value, "",
+            zrodlo="Domyslnie proporcjonalnie z obu, kluczem PUM. Ustawa nie wskazuje "
+                   "puli. ZALOZENIE. Wartosc opisowa.",
+            podstawa="ustawa z 16.12.2020, Dz.U. 2021 poz. 223",
+            format_liczby=TEKST, zolte=True)
+
+    # --- katalog zalozen ---
+    wiersz += 1
+    wiersz = _sekcja(
+        ws, wiersz,
+        "KATALOG ZALOZEN — PELNA LISTA PYTAN DO BGK (patrz PYTANIA_DO_BGK.md)",
+    )
+    for kol, tytul in enumerate(
+        ["Zalozenie", "Model przyjmuje", "Odczyt alternatywny", "Gdzie to zmienic"],
+        start=1,
+    ):
+        komorka = ws.cell(row=wiersz, column=kol, value=tytul)
+        komorka.font = Font(bold=True, size=9)
+        komorka.border = RAMKA_DOL
+    wiersz += 1
+    for z in _katalog_zalozen.wedlug_priorytetu():
+        ws.cell(row=wiersz, column=1, value=f"{z.priorytet}. {z.tytul}").font = Font(size=9)
+        ws.cell(row=wiersz, column=2, value=z.domyslnie).font = Font(size=9)
+        ws.cell(row=wiersz, column=3, value=z.alternatywa).font = Font(size=9)
+        ws.cell(
+            row=wiersz, column=4,
+            value=z.sciezka or "brak przelacznika — zmiana wymaga wejscia w kod",
+        ).font = Font(size=9, color="FF666666")
+        wiersz += 1
 
     # --- zastrzezenia ---
     wiersz += 1

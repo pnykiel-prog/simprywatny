@@ -27,7 +27,7 @@ from decimal import Decimal
 from typing import Iterator, Optional, Tuple
 
 from . import prawo
-from .dane import Wejscie
+from .dane import Wejscie, ZrodloLokaliDlaGminy
 from .grunt import UjecieGruntu, rozstrzygnij
 from .waluta import ZERO, bezpieczny_iloraz, na_m2, zl
 
@@ -181,6 +181,19 @@ class Alokacja:
         return iter((self.spoleczna, self.komunalna))
 
 
+def _udzial_po_oddaniu(pum_puli: Decimal, pum_dla_gminy: Decimal) -> Decimal:
+    """Udzial powierzchni przychodowej puli, ktora oddaje gminie caly pakiet.
+
+    Gdy lokale dla gminy nie miesza sie w puli, udzial schodzi do zera, a reszta
+    zostaje nierozliczona. Model nie przerzuca nadwyzki na druga pule po cichu —
+    to byloby ciche wybranie trzeciej interpretacji zamiast tej, ktora wskazano.
+    Sytuacje zglasza `grunt.rozstrzygnij` osobnym ostrzezeniem.
+    """
+    if pum_puli <= ZERO:
+        return Decimal(1)
+    return max(ZERO, (pum_puli - pum_dla_gminy) / pum_puli)
+
+
 def build(w: Wejscie, u: Optional[UjecieGruntu] = None) -> Alokacja:
     """Dzieli koszty przedsiewziecia na pule kluczem PUM.
 
@@ -199,16 +212,35 @@ def build(w: Wejscie, u: Optional[UjecieGruntu] = None) -> Alokacja:
     # przyniosa czynszu. Specyfikacja nie wskazuje puli, z ktorej pochodza, wiec
     # model scina powierzchnie przychodowa obu pul tym samym kluczem PUM —
     # ZALOZENIE zglaszane przez `grunt.rozstrzygnij`.
-    udzial_przychodowy = Decimal(1)
+    # Wersja domyslna — obie pule oddaja proporcjonalnie. Przelacznik
+    # `lokale_dla_gminy_z_puli` pozwala obciazyc jedna z nich w calosci; wybor
+    # nie jest obojetny, bo pula, ktora oddaje, traci przychod przy pelnym koszcie.
+    udzial_przychodowy_spoleczna = Decimal(1)
+    udzial_przychodowy_komunalna = Decimal(1)
     if u.pum_dla_gminy > ZERO and p.pum_laczne > ZERO:
-        udzial_przychodowy = (p.pum_laczne - u.pum_dla_gminy) / p.pum_laczne
+        zrodlo = w.przelaczniki.lokale_dla_gminy_z_puli
+        if zrodlo is ZrodloLokaliDlaGminy.PROPORCJONALNIE:
+            wspolny = (p.pum_laczne - u.pum_dla_gminy) / p.pum_laczne
+            udzial_przychodowy_spoleczna = wspolny
+            udzial_przychodowy_komunalna = wspolny
+        elif zrodlo is ZrodloLokaliDlaGminy.SPOLECZNA:
+            udzial_przychodowy_spoleczna = _udzial_po_oddaniu(
+                p.pum_spoleczne, u.pum_dla_gminy
+            )
+        else:
+            udzial_przychodowy_komunalna = _udzial_po_oddaniu(
+                p.pum_komunalne, u.pum_dla_gminy
+            )
 
     # § 12 ust. 7 rozp. 766 dotyczy przedsiewziecia finansowanego zwrotnie.
     # Domyslnie hybryda to dwa odrebne przedsiewziecia, wiec limit siega tylko
     # tej puli, ktora korzysta z kredytu.
     kredyt_aktywny = w.pula_spoleczna.kredyt.aktywny
 
-    def pula(nazwa: str, pum: Decimal, udzial: Decimal, kredytowa: bool) -> PulaKosztow:
+    def pula(
+        nazwa: str, pum: Decimal, udzial: Decimal, kredytowa: bool,
+        udzial_przychodowy: Decimal,
+    ) -> PulaKosztow:
         koszty_bez_gruntu = (
             k.koszt_budowy_na_m2 * pum
             + (k.infrastruktura + k.projekt_i_nadzor + k.koszty_ogolne + k.rezerwa + k.dzwigi)
@@ -239,8 +271,14 @@ def build(w: Wejscie, u: Optional[UjecieGruntu] = None) -> Alokacja:
         )
 
     alokacja = Alokacja(
-        spoleczna=pula("spoleczna", p.pum_spoleczne, udzial_spoleczny, kredyt_aktywny),
-        komunalna=pula("komunalna", p.pum_komunalne, udzial_komunalny, False),
+        spoleczna=pula(
+            "spoleczna", p.pum_spoleczne, udzial_spoleczny, kredyt_aktywny,
+            udzial_przychodowy_spoleczna,
+        ),
+        komunalna=pula(
+            "komunalna", p.pum_komunalne, udzial_komunalny, False,
+            udzial_przychodowy_komunalna,
+        ),
         pum_laczne=p.pum_laczne,
         pum_przychodowe_laczne=p.pum_laczne - u.pum_dla_gminy,
         grunt_obciety_limitem=ZERO,

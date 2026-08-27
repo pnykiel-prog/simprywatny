@@ -133,7 +133,39 @@ def _wartosc_do_pasma(w: Wejscie, ostrzezenia: List[Ostrzezenie]) -> Decimal:
     g = w.grunt
     if not g.forma.daje_pasmo_45:
         return ZERO
+    bonifikata = (
+        g.forma is FormaGruntu.NABYCIE_OD_GMINY
+        and g.cena_nabycia is not None
+        and g.cena_nabycia != g.wartosc
+    )
     if w.przelaczniki.pasmo_liczone_od_wartosci_z_operatu:
+        if bonifikata:
+            # Odczyt DOMYSLNY tez jest zalozeniem i tez ma byc widoczny. Bez tego
+            # ostrzezenia kwestia 9.3 zglaszala sie wylacznie przy odczycie
+            # alternatywnym, wiec wariant domyslny przechodzil po cichu —
+            # dokladnie ta klasa bledu, ktora zamyka rozdz. 7 pakietu nr 2.
+            assert g.cena_nabycia is not None
+            ostrzezenia.append(
+                Ostrzezenie(
+                    kod="ZALOZENIE_GRUNT_9_3",
+                    tresc=(
+                        "Kwestia 9.3: dzialka kupiona od gminy z bonifikata — cena "
+                        f"{g.cena_nabycia:.2f} zl wobec {g.wartosc:.2f} zl z operatu. "
+                        "Przyjeto, ze pasmo dotacji liczy sie od WARTOSCI Z OPERATU, "
+                        "bo art. 13 ust. 1 pkt 1 mowi o wartosci prawa, nie o cenie "
+                        "nabycia. Odczyt alternatywny — od ceny zaplaconej — obnizylby "
+                        f"pasmo o {g.wartosc - g.cena_nabycia:.2f} zl. ZALOZENIE do "
+                        "potwierdzenia w BGK."
+                    ),
+                    podstawa="art. 13 ust. 1 pkt 1 ustawy z 8.12.2006",
+                    tresc_potoczna=(
+                        "Dotacja liczona od wartości działki z operatu, a nie od ceny po "
+                        "bonifikacie. Odczyt przeciwny dałby niższą dotację — do "
+                        "potwierdzenia w Banku."
+                    ),
+                    waga=Waga.ZMIENIA_KWOTE,
+                )
+            )
         return g.wartosc
     if g.forma is not FormaGruntu.NABYCIE_OD_GMINY:
         return g.wartosc

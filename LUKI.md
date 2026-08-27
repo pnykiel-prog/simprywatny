@@ -864,3 +864,101 @@ się wyłącznie formą aportu — inwestora i gminy. Aport gminy został usuni�
 z zakresu (rozdz. 17), więc test porównuje aport inwestora z nabyciem od gminy
 i z dzierżawą: te same koszty, ta sama kwota gotówkowa tam, gdzie ma być ta sama,
 i wkład łączny większy wyłącznie przy aporcie inwestora.
+
+---
+
+## 22. Scenariusze rozstrzygające dla założeń
+
+**Status: uzupełnienie metodyczne. Nie zmienia liczb, zmienia to, czy założenie
+da się w ogóle sprawdzić.**
+
+### 22.1. Problem
+
+Przy okazji bazy dotacji wyszło, że testy odbiorcze korzystały ze scenariusza
+bez gruntu, w którym obie konkurencyjne interpretacje dają identyczny wynik.
+Test przechodził niezależnie od tego, którą przyjęto — więc nie chronił przed
+niczym.
+
+To jest problem ogólniejszy niż jeden przypadek. Każde oznaczenie `ZALOZENIE_*`
+niesie ze sobą alternatywę; jeżeli zestaw testowy jej nie odróżnia, założenie
+jest w praktyce nieweryfikowalne.
+
+### 22.2. Katalog założeń
+
+`sim_kalkulator/zalozenia.py` — czternaście wpisów. Każdy podaje: kod
+ostrzeżenia, ścieżkę przełącznika w YAML, odczyt przyjęty, odczyt alternatywny,
+podstawę prawną, gotowe pytanie do BGK i wagę dla wyniku.
+
+Katalog jest jedynym źródłem trzech rzeczy naraz: testów rozstrzygających,
+panelu założeń w interfejsie i pisma do Banku. Dzięki temu nie mogą się
+rozjechać.
+
+### 22.3. Test kompletności — właściwa ochrona
+
+`tests/test_zalozenia.py` czyta kody `ZALOZENIE_*` **wprost ze źródeł silnika**,
+nie z listy przepisanej ręcznie, i wymaga dla każdego:
+
+- wpisu w katalogu,
+- scenariusza, w którym oba odczyty dają **mierzalnie różny** wynik,
+- dowodu, że scenariusz faktycznie uruchamia to konkretne ostrzeżenie.
+
+Ten ostatni warunek jest istotny: bez niego dałoby się zbudować scenariusz,
+w którym liczby się różnią z zupełnie innego powodu, a badane założenie w ogóle
+nie działa.
+
+Nowe założenie bez wpisu i bez scenariusza nie przejdzie zestawu testowego.
+
+### 22.4. Cztery rzeczy, które przy tym wyszły
+
+**Kwestia 9.3 zgłaszała się tylko przy odczycie alternatywnym.** Ostrzeżenie
+`ZALOZENIE_PASMO_OD_CENY` powstawało wyłącznie, gdy użytkownik wybrał liczenie
+pasma od ceny po bonifikacie. Odczyt domyślny — od wartości z operatu — przechodził
+w milczeniu, mimo że jest tak samo założeniem. Dodany `ZALOZENIE_GRUNT_9_3`,
+zgłaszany zawsze, gdy cena nabycia odbiega od operatu. To dokładnie ta klasa
+błędu, którą rozdział ma zamykać.
+
+**Trzy założenia nie miały przełącznika**, więc nie dało się ich rozstrzygnąć
+przez podmianę flagi. Dodane:
+
+| przełącznik | domyślnie | odczyt alternatywny |
+|---|---|---|
+| `przelaczniki.bonus_podnosi_prog_gruntowy` | `false` — bonus podnosi tylko limit górny | `true` — oba progi w górę o 5 pp |
+| `przelaczniki.lokale_dla_gminy_z_puli` | `proporcjonalnie` | `komunalna` albo `spoleczna` |
+| `przelaczniki.okres_rozliczeniowy_nadwyzki_lat` | `1` — kontrola co roku | dłuższy okres, rzadsza siatka |
+
+**Wybór puli mierzy się na właściwej puli.** Przy okresie rozliczeniowym
+pierwsza wersja testu mierzyła nadwyżkę w puli społecznej — a tam najgorszy rok
+wypada ostatni, a ostatni jest punktem kontrolnym przy **każdej** długości
+okresu. Test przechodziłby, nie odróżniając niczego. Miara przeniesiona na pulę
+komunalną, gdzie najgorszy rok wypada pierwszy.
+
+**Jedno założenie zostaje bez przełącznika, świadomie.** Baza naliczania dotacji
+(`ZALOZENIE_GRUNT_W_BAZIE_DOTACJI`) — sprawa została rozstrzygnięta na rzecz
+obecnej implementacji (pakiet nr 2, rozdz. 10: załącznik do rozporządzenia
+zalicza wartość gruntu do środków własnych po stronie źródeł, więc wspiera
+implementację, a nie zastrzeżenie). Przełącznik byłby machiną pod pytanie już
+zamknięte. Silnik i tak liczy obie wartości i podaje różnicę w treści
+ostrzeżenia, więc scenariusz rozstrzyga mimo braku flagi — test wymaga tego
+wprost, a wyjątek w teście kompletności obejmuje wyłącznie mechanizm
+`OBLICZANY_OBOK`.
+
+### 22.5. Pismo do Banku
+
+`PYTANIA_DO_BGK.md` — **dokument generowany** z katalogu przez
+`scripts/pytania_do_bgk.py`. Trzynaście pytań w kolejności wagi: najpierw te,
+które odwracają werdykt, potem te, które przesuwają kwotę. Test pilnuje, że plik
+na dysku zgadza się z katalogiem — bez tego lista starzeje się po cichu.
+
+Pakiet wymieniał sześć pytań. Katalog daje trzynaście, bo obejmuje także
+założenia, które w scenariuszu odniesienia nie działają, a przy innych
+ustawieniach zaczną. Sześć z pakietu jest w środku; trzy z nich mają priorytet 1.
+
+---
+
+## Rozdz. 8 pakietu nr 2 — bez działania
+
+Rozdział o skutkach większościowego udziału gminy stracił przedmiot wraz
+z usunięciem aportu gminy z zakresu (rozdz. 17 tego pliku). Przy pozostałych
+formach gruntu gmina nie obejmuje udziałów, więc nie ma progu 50% do
+przekroczenia, nie ma komunikatu o utracie kontroli nad stawkami czynszu i nie
+ma czego wyszarzać w interfejsie. Odnotowane, nie wdrażane.

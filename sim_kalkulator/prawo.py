@@ -140,6 +140,15 @@ REGULY_PROGU: Tuple[str, ...] = (
     REGULA_PROGU_NIZSZY, REGULA_PROGU_WYZSZY, REGULA_PROGU_DOMINUJACY,
 )
 
+# Z ktorej puli pochodza lokale oddawane gminie w trybie "lokal za grunt".
+# Ustawa z 16.12.2020 tego nie rozstrzyga — patrz LUKI.md.
+LOKALE_GMINY_PROPORCJONALNIE = "proporcjonalnie"
+LOKALE_GMINY_Z_KOMUNALNEJ = "komunalna"
+LOKALE_GMINY_ZE_SPOLECZNEJ = "spoleczna"
+ZRODLA_LOKALI_DLA_GMINY: Tuple[str, ...] = (
+    LOKALE_GMINY_PROPORCJONALNIE, LOKALE_GMINY_Z_KOMUNALNEJ, LOKALE_GMINY_ZE_SPOLECZNEJ,
+)
+
 # § 12 ust. 7 rozp. 766 — grunt wniesiony aportem w sciezce kredytowej jest
 # kosztem, ale tylko do tego udzialu calkowitych kosztow przedsiewziecia
 GRUNT_APORT_LIMIT_W_KOSZTACH_KREDYT = Decimal("0.20")

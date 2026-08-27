@@ -134,6 +134,8 @@ class RekompensataPuli:
     # ustawiony TYLKO wtedy, gdy pula ma oba instrumenty i istnieje drugi odczyt.
     prog_tolerancji_uzasadnienie: str = ""
     prog_tolerancji_alternatywny: Optional[Decimal] = None
+    # Dlugosc okresu rozliczeniowego nadwyzki — patrz `punkty_kontrolne`.
+    okres_rozliczeniowy_lat: int = 1
 
     @property
     def ruoig(self) -> Decimal:
@@ -235,12 +237,32 @@ class RekompensataPuli:
         return tuple(okresy)
 
     @property
-    def okres_najgorszy(self) -> Optional[OkresNadwyzki]:
-        """Rok o najwyzszej nadwyzce wzglednej. To on rozstrzyga werdykt."""
+    def punkty_kontrolne(self) -> Tuple[OkresNadwyzki, ...]:
+        """Momenty, w ktorych nadwyzka jest faktycznie rozliczana.
+
+        Przepis odnosi prog do OKRESU ROZLICZENIOWEGO, a jego dlugosci nie podaje
+        — siedzi w umowie z Bankiem, ktorej model nie zna. Przy okresie rocznym
+        (domyslnym) kontrola jest w kazdym roku i to wariant najostrozniejszy;
+        dluzszy okres daje rzadsza siatke, wiec pojedynczy zly rok moze zostac
+        wchloniety przez sasiednie. Ostatni rok wchodzi zawsze — okres powierzenia
+        konczy sie rozliczeniem niezaleznie od tego, czy wypada rowno.
+        """
         profil = self.profil
         if not profil:
+            return ()
+        krok = max(1, self.okres_rozliczeniowy_lat)
+        wybrane = [o for o in profil if o.rok % krok == 0]
+        if not wybrane or wybrane[-1].rok != profil[-1].rok:
+            wybrane.append(profil[-1])
+        return tuple(wybrane)
+
+    @property
+    def okres_najgorszy(self) -> Optional[OkresNadwyzki]:
+        """Punkt kontrolny o najwyzszej nadwyzce wzglednej. To on daje werdykt."""
+        punkty = self.punkty_kontrolne
+        if not punkty:
             return None
-        return max(profil, key=lambda o: o.nadwyzka_wzgledna)
+        return max(punkty, key=lambda o: o.nadwyzka_wzgledna)
 
     @property
     def nadwyzka_wzgledna_najgorsza(self) -> Decimal:
@@ -555,6 +577,7 @@ def _rekompensata_puli(
         rz_lata=rz_lata,
         prog_tolerancji_uzasadnienie=uzasadnienie,
         prog_tolerancji_alternatywny=prog_alternatywny,
+        okres_rozliczeniowy_lat=w.przelaczniki.okres_rozliczeniowy_nadwyzki_lat,
     )
 
 
@@ -730,8 +753,11 @@ def build(
                     f"narastajacym, rok po roku przez caly {pula.okres_powierzenia_lat}-letni "
                     f"okres powierzenia, i porownywana z progiem {pula.prog_tolerancji:.0%} "
                     "rekompensaty otrzymanej do danego roku. Przepis odnosi prog do okresu "
-                    "rozliczeniowego, a model nie zna jego dlugosci — profil roczny jest "
-                    "najblizszym przyblizeniem, jakie da sie zbudowac bez tej danej."
+                    f"rozliczeniowego; model przyjmuje okres {pula.okres_rozliczeniowy_lat}-letni "
+                    f"({len(pula.punkty_kontrolne)} punktow kontrolnych), bo dlugosci nie ma "
+                    "w zadnym dokumencie wejsciowym. Okres roczny jest wariantem "
+                    "najostrozniejszym — dluzszy daje rzadsza siatke i lagodniejszy wynik. "
+                    "ZALOZENIE do potwierdzenia w BGK."
                 ),
                 podstawa="§ 7 ust. 9 rozp. Dz.U. 2025 poz. 1897; § 13 ust. 8 rozp. t.j. Dz.U. 2021 poz. 766",
                 tresc_potoczna=(
@@ -827,6 +853,7 @@ def _scal(w: Wejscie, a: RekompensataPuli, b: RekompensataPuli) -> RekompensataP
         rz_lata=_zsumuj_lata(a.rz_lata, b.rz_lata, lat),
         prog_tolerancji_uzasadnienie=uzasadnienie,
         prog_tolerancji_alternatywny=prog_alternatywny,
+        okres_rozliczeniowy_lat=w.przelaczniki.okres_rozliczeniowy_nadwyzki_lat,
     )
 
 
