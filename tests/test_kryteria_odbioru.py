@@ -537,6 +537,62 @@ class TestRynek_WarstwaInterakcji:
         assert bledy == [], bledy[:3]
 
     @pytest.mark.wolne
+    def test_krzywa_negocjacyjna_idzie_za_zmiana_wejscia(self, strona):
+        """Kaskada i krzywa musza opisywac TO SAMO wejscie.
+
+        Wczesniej suwaki, pola liczbowe i parametry rynkowe wolaly samo
+        przeliczenie, wiec kaskada pokazywala nowy wariant, a wykres wrazliwosci
+        poprzedni. Przy zmianie skali projektu dawalo to dwie liczby dla tego
+        samego ustawienia — obie policzone poprawnie, tyle ze jedna z wejscia,
+        ktorego juz nie ma.
+        """
+        p, bledy = strona
+        odczyt = """() => {
+          const pkt = (sweep && sweep.punkty || []).find(x => x.udzial === 0);
+          const k = document.querySelector('#p-kaskada').textContent;
+          return {sweep: pkt ? pkt.wklad_wymagany : null, podpis: k};
+        }"""
+        # Skokowa zmiana skali przedsiewziecia — przez pole liczbowe, czyli
+        # dokladnie ta droga, ktora wczesniej gubila odswiezenie krzywej.
+        p.evaluate(
+            """async () => {
+                Object.assign(zmiany, {
+                    "powierzchnie.udzial_puli_komunalnej": 0,
+                    "powierzchnie.pum_laczne": 3000,
+                    "powierzchnie.liczba_lokali": 55,
+                });
+                document.querySelector('#pokretlo').value = 0;
+                await przelicz();
+                await odswiezSweep();
+            }"""
+        )
+        p.wait_for_timeout(2500)
+        przed = p.evaluate(odczyt)
+
+        pole = "#p-powierzchnie\\.pum_laczne"
+        p.fill(pole, "12000")
+        p.dispatch_event(pole, "change")
+        p.wait_for_timeout(6000)
+        po = p.evaluate(odczyt)
+
+        assert przed["sweep"] is not None and po["sweep"] is not None
+        assert po["sweep"] != przed["sweep"], (
+            "krzywa nie zauwazyla zmiany skali przedsiewziecia — "
+            f"nadal {przed['sweep']}"
+        )
+        # I najwazniejsze: w punkcie 0% krzywa mowi to samo co kaskada.
+        zgodnosc = p.evaluate(
+            """() => {
+              const pkt = (sweep && sweep.punkty || []).find(x => x.udzial === 0);
+              return [pkt ? pkt.wklad_wymagany : null,
+                      ostatniaKaskada ? ostatniaKaskada.wymagany : null];
+            }"""
+        )
+        assert zgodnosc[1] is not None, "kaskada nie zostala zapamietana"
+        assert abs(zgodnosc[0] - zgodnosc[1]) < 0.01, zgodnosc
+        assert bledy == [], bledy[:3]
+
+    @pytest.mark.wolne
     def test_kolor_etykiety_nie_jest_zjadany_przez_klase(self, strona):
         """Regula CSS bije atrybut prezentacyjny, wiec `.os{fill:...}` zjadal
         kazdy kolor podany przy tworzeniu elementu i wszystkie podpisy wychodzily

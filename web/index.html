@@ -182,6 +182,7 @@ button.akcja:disabled{opacity:.55;cursor:progress}
 .zalozenie:last-child{border-bottom:none}
 .zalozenie .glowa-zalozenia{display:flex;gap:7px;align-items:center;font-size:12.5px}
 .zalozenie.dziala{border-left:3px solid var(--uwaga);padding-left:8px}
+.wykres.nieaktualny{opacity:.45;transition:opacity .15s}
 .znacznik-zalozenia{font-size:10px;text-transform:uppercase;letter-spacing:.04em;
   padding:1px 5px;border-radius:3px;background:var(--ostrzezenie-tlo,#fdf3d8);
   color:var(--ostrzezenie-tekst,#7a5c12);vertical-align:middle}
@@ -363,6 +364,10 @@ const $ = (s) => document.querySelector(s);
 const NS = "http://www.w3.org/2000/svg";
 const zmiany = {};
 let zakresy = null, sweep = null, liczenie = false, ponow = false;
+// Ostatnio narysowana kaskada. Trzymana po to, żeby dało się z zewnątrz
+// sprawdzić, czy krzywa negocjacyjna mówi o tym samym wejściu co ona —
+// test przeglądarkowy porównuje właśnie te dwie liczby.
+let ostatniaKaskada = null;
 
 /* ---------- formatowanie ---------- */
 const nf = (min, max) => new Intl.NumberFormat("pl-PL",
@@ -538,7 +543,14 @@ function rysujNegocjacje(s, biezacyUdzial){
   // z udziałem gminy, bo pula komunalna nie ma kredytu. To ten sam mechanizm,
   // który na wykresie czynszowym daje próg bezskuteczności.
   const zPoza = pkt.filter(p => p.wklad_poza_zasiegiem != null);
-  if (zPoza.length === pkt.length && zPoza.some(p => p.wklad_poza_zasiegiem > 0)){
+  const rozbicie = zPoza.length === pkt.length && zPoza.some(p => p.wklad_poza_zasiegiem > 0);
+  // Gdy kredyt wiąże POTRZEBA, a nie udźwig czynszu, pula społeczna nie
+  // potrzebuje kapitału i cały pozostały wkład jest komunalny — czyli w całości
+  // poza zasięgiem czynszu. Obie warstwy się wtedy pokrywają i rysowanie
+  // przerywanej linii dokładnie na linii głównej wygląda jak usterka.
+  const calosc = rozbicie && pkt.every(p =>
+    Math.abs(p.wklad_poza_zasiegiem - p.wklad_wymagany) < 1);
+  if (rozbicie){
     const dolne = pkt.map((p,i) =>
       (i ? "L" : "M") + x(p.udzial).toFixed(1) + " " + y(p.wklad_poza_zasiegiem).toFixed(1)
     ).join(" ");
@@ -547,8 +559,9 @@ function rysujNegocjacje(s, biezacyUdzial){
     const gp = el("g", {});
     gp.appendChild(el("path", {d: dolne + zamkniecie, fill:"var(--s1)", opacity:".18",
       stroke:"none"}));
-    gp.appendChild(el("path", {d: dolne, fill:"none", stroke:"var(--s1)",
-      "stroke-width":1.5, "stroke-dasharray":"4 3"}));
+    if (!calosc)
+      gp.appendChild(el("path", {d: dolne, fill:"none", stroke:"var(--s1)",
+        "stroke-width":1.5, "stroke-dasharray":"4 3"}));
     tytulHover(gp, s.podpis_rozbicia_wkladu || "");
     svg.appendChild(gp);
     // Podpis WEWNATRZ zacieniowanego pasma, nie przy jego krawedzi — przy
@@ -557,7 +570,8 @@ function rysujNegocjacje(s, biezacyUdzial){
     if (srodek && srodek.wklad_poza_zasiegiem > 0)
       svg.appendChild(el("text", {x:x(srodek.udzial),
         y:(y(srodek.wklad_poza_zasiegiem) + y(0)) / 2, "text-anchor":"middle",
-        class:"os", fill:"var(--tekst-2)"}, "czynsz tego nie ruszy"));
+        class:"os", fill:"var(--tekst-2)"},
+        calosc ? "czynsz nie rusza tego wkładu w ogóle" : "czynsz tego nie ruszy"));
   }
 
   const d = pkt.map((p,i) => (i ? "L" : "M") + x(p.udzial).toFixed(1) + " " + y(p.wklad_wymagany).toFixed(1)).join(" ");
@@ -603,12 +617,13 @@ function rysujNegocjacje(s, biezacyUdzial){
   const zd = document.createElement("div");
   zd.textContent = s.podsumowanie;
   podpisN.appendChild(zd);
-  if (zPoza.length === pkt.length && zPoza.some(p => p.wklad_poza_zasiegiem > 0)
-      && s.podpis_rozbicia_wkladu){
+  if (rozbicie && s.podpis_rozbicia_wkladu){
     const r2 = document.createElement("div");
     r2.className = "info";
     r2.style.marginTop = "6px";
-    r2.textContent = s.podpis_rozbicia_wkladu;
+    r2.textContent = calosc
+      ? (s.podpis_calosc_poza_zasiegiem || s.podpis_rozbicia_wkladu)
+      : s.podpis_rozbicia_wkladu;
     podpisN.appendChild(r2);
   }
   // Gdy test blokujący nie zależy od tej osi, samo czerwone tło niczego nie mówi.
@@ -1112,7 +1127,7 @@ function rysujSuwaki(z){
     wejscie.addEventListener("input", () => {
       const {naWartosc} = wartoscSuwaka(s);
       zmiany[s.klucz] = Number(naWartosc(Number(wejscie.value)).toFixed(6));
-      przelicz();
+      przeliczIKrzywa();
     });
   });
   $("#suwaki").querySelectorAll(".pomoc").forEach((b) => {
@@ -1140,7 +1155,7 @@ function rysujPolaLiczbowe(z){
       if (w.value === "") delete zmiany[p.klucz];
       else zmiany[p.klucz] = p.typ === "tekst" ? w.value : Number(w.value);
       if (!stawkaGotowa()) return;
-      przelicz();
+      przeliczIKrzywa();
     });
   });
   stawkaGotowa();
@@ -1235,7 +1250,7 @@ function rysujGrunt(z){
       zmiany["grunt.pochodzenie"] = pochodzenie;
       if (pierwsza) zmiany["grunt.forma"] = pierwsza;
       ukryjPorownanie();
-      przelicz().then(odswiezSweep);
+      przeliczIKrzywa(0);
     });
   });
   $("#grunt-formy").querySelectorAll(".forma").forEach((btn) => {
@@ -1243,14 +1258,14 @@ function rysujGrunt(z){
       if (btn.disabled || btn.dataset.klucz === g.forma) return;
       zmiany["grunt.forma"] = btn.dataset.klucz;
       ukryjPorownanie();
-      przelicz().then(odswiezSweep);
+      przeliczIKrzywa(0);
     });
   });
   istotne.forEach((pole) => {
     const w = document.getElementById("g-" + pole.klucz);
     w.addEventListener("change", () => {
       if (w.value === "") delete zmiany[pole.klucz]; else zmiany[pole.klucz] = Number(w.value);
-      przelicz().then(odswiezSweep);
+      przeliczIKrzywa(0);
     });
   });
 }
@@ -1325,7 +1340,7 @@ function rysujParametryRynkowe(z){
     const w = document.getElementById("r-" + p.klucz);
     w.addEventListener("change", () => {
       if (w.value === "") delete zmiany[p.klucz]; else zmiany[p.klucz] = Number(w.value);
-      przelicz();
+      przeliczIKrzywa();
     });
   });
 }
@@ -1372,6 +1387,7 @@ async function przelicz(){
     przyjmijSciagniecie(w);
     rysujWerdykty(w);
     rysujKomunikaty(w);
+    ostatniaKaskada = w.wykresy.kaskada;
     rysujKaskade(w.wykresy.kaskada);
     rysujCzynsz(w.wykresy.czynsz_poziomy);
     rysujGauge(w.wykresy.rekompensata_zapas);
@@ -1407,6 +1423,32 @@ async function odswiezSweep(){
   }
 }
 
+/* Krzywa negocjacyjna musi iść za KAŻDĄ zmianą wejścia, nie tylko za pokrętłem.
+   Wcześniej suwaki, pola liczbowe i parametry rynkowe wołały samo `przelicz()`,
+   więc kaskada pokazywała nowy wariant, a wykres wrażliwości poprzedni — dwie
+   liczby dla tego samego ustawienia, obie policzone poprawnie, tyle że jedna
+   z nieaktualnego wejścia.
+
+   Sweep to dwadzieścia jeden pełnych przeliczeń, więc przy przeciąganiu suwaka
+   nie ma sensu wołać go na każdą klatkę. Stąd odroczenie: liczy się dopiero,
+   gdy ruch ustanie. Do czasu odpowiedzi wykres jest przygaszony, żeby nie
+   udawał aktualnego. */
+let sweepOdroczony = null;
+function poprosOSweep(zwloka = 450){
+  $("#w-negocjacja").classList.add("nieaktualny");
+  clearTimeout(sweepOdroczony);
+  sweepOdroczony = setTimeout(() => {
+    odswiezSweep().finally(() => $("#w-negocjacja").classList.remove("nieaktualny"));
+  }, zwloka);
+}
+
+/* Jedno wejście dla wszystkich zdarzeń wejściowych: przelicz i zamów krzywą. */
+function przeliczIKrzywa(zwloka){
+  const p = przelicz();
+  poprosOSweep(zwloka);
+  return p;
+}
+
 /* ================= zapis ================= */
 function pobierz(nazwa, dane, typ){
   const url = URL.createObjectURL(new Blob([dane], {type: typ}));
@@ -1422,11 +1464,13 @@ function base64NaBajty(b64){
 }
 
 /* ================= zdarzenia ================= */
+// Pokrętło nie zmienia krzywej — przesuwa się po niej. Przeliczenie idzie
+// z każdą klatką, sweep dopiero po puszczeniu i tylko wtedy, gdy go brak.
 $("#pokretlo").addEventListener("input", () => { przelicz(); });
-$("#pokretlo").addEventListener("change", () => { odswiezSweep(); });
+$("#pokretlo").addEventListener("change", () => { if (!sweep) poprosOSweep(0); });
 $("#tryb-reczny").addEventListener("change", (ev) => {
   zmiany["przelaczniki.tryb_kredytu"] = ev.target.checked ? "reczny" : "automatyczny";
-  przelicz().then(odswiezSweep);
+  przeliczIKrzywa(0);
 });
 $("#btn-porownanie").addEventListener("click", async (ev) => {
   const b = ev.currentTarget, etykieta = b.textContent;

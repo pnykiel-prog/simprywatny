@@ -45,6 +45,50 @@ class TestJednaSciezkaObliczeniowa:
         kaskada = api._kaskada(r)
         assert punkt.wklad_wymagany == pytest.approx(D(str(kaskada["wymagany"])))
 
+    @pytest.mark.parametrize(
+        "scenariusz",
+        [
+            {},
+            APORT,
+            # Duze przedsiewziecie — koszt ponad 100 mln. Rzedy wielkosci maja
+            # znaczenie: przy takich kwotach zaokraglenia i pulapy kredytu
+            # zachowuja sie inaczej niz w przykladzie wzorcowym.
+            dict(powierzchnie__pum_laczne=13000.0, powierzchnie__liczba_lokali=240,
+                 inwestor__dostepny_wklad_wlasny=4600000.0),
+            # Wysoki czynsz — kredyt wiazany udzwigiem, nie potrzeba.
+            dict(parametry_zewnetrzne__wartosc_odtworzeniowa_m2=20000.0,
+                 pula_spoleczna__czynsz_zakladany_m2_mies=30.0,
+                 pula_spoleczna__partycypacja__stawka_procent_kosztu_lokalu=0.05),
+        ],
+        ids=["wzorcowy", "aport_inwestora", "duze_przedsiewziecie", "wiaze_udzwig"],
+    )
+    def test_caly_sweep_zgadza_sie_z_kaskada_punkt_po_punkcie(self, scenariusz):
+        """Kazdy punkt siatki, nie tylko biezacy i nie tylko srodek zakresu.
+
+        Rozjazd widoczny przy udziale 0% przeszedl wczesniej niezauwazony, bo
+        testy porownywaly wybrane punkty. Tutaj porownywana jest CALA siatka
+        i to na poziomie ODPOWIEDZI API, a nie funkcji wewnetrznych — bo to
+        odpowiedzi widzi przegladarka, a droga do nich (sciaganie czynszu,
+        walidacja przy zmianie udzialu) bywa inna dla kazdego z dwoch wywolan.
+        """
+        bazowe = wspolne.zmien(**scenariusz)
+        kod, sweep = api.obsluz("sweep", bazowe, {})
+        assert kod == 200, sweep
+        policzalne = [p for p in sweep["punkty"] if p["policzalny"]]
+        assert len(policzalne) >= 15, "za malo punktow, zeby test cokolwiek znaczyl"
+
+        for punkt in policzalne:
+            kod, wynik = api.obsluz(
+                "przelicz", bazowe,
+                {"powierzchnie.udzial_puli_komunalnej": punkt["udzial"]},
+            )
+            assert kod == 200, wynik
+            kaskada = wynik["wykresy"]["kaskada"]["wymagany"]
+            assert punkt["wklad_wymagany"] == pytest.approx(kaskada, abs=0.01), (
+                f"udzial {punkt['udzial']:.2f}: sweep {punkt['wklad_wymagany']:,.2f} "
+                f"!= kaskada {kaskada:,.2f}"
+            )
+
     @pytest.mark.parametrize("zmiany", [{}, APORT], ids=["nabycie", "aport_inwestora"])
     def test_kaskada_i_test_kapitalowy_podaja_ten_sam_wklad(self, zmiany):
         r = wynik(0.3, **zmiany)

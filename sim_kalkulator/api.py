@@ -1349,6 +1349,16 @@ def sweep_json(w) -> Dict[str, Any]:
         # ktora dziala, zamiast swiecic na czerwono na calej szerokosci.
         "blokada_niezalezna_od_osi": analiza.sweep.blokada_niezalezna_od_osi,
         "dzwignia_poza_osia": _dzwignia_poza_osia(w, analiza.sweep.blokada_niezalezna_od_osi),
+        # Wariant skrajny: kredyt wiaze POTRZEBA, wiec pula spoleczna nie
+        # potrzebuje kapitalu i caly wkład jest komunalny. Obie warstwy sie wtedy
+        # pokrywaja — zdanie musi to powiedziec, bo sam wykres pokazuje wtedy
+        # jedna linie zamiast dwoch i wyglada na zepsuty.
+        "podpis_calosc_poza_zasiegiem": (
+            "Cały wymagany wkład jest poza zasięgiem czynszu: kredyt pokrywa już całą "
+            "potrzebę puli społecznej, a to, co zostaje, przypada mieszkaniom komunalnym, "
+            "które kredytu nie mają. Podnoszenie stawki nie zmieni tu nic — dźwignią jest "
+            "proporcja mieszkań albo forma działki."
+        ),
         "podpis_rozbicia_wkladu": (
             "Zacieniowana warstwa u dołu to wkład, którego czynsz nie ruszy — mieszkania "
             "komunalne nie mają kredytu, a tylko kredyt zamienia przyszły czynsz na kapitał "
