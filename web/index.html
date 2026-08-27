@@ -617,7 +617,9 @@ function rysujCzynsz(c){
         x: koliduje ? xw - 6 : xw + 6, y: gora + 36, class: "os", fill: kolor,
         "text-anchor": koliduje ? "end" : "start",
       }, zl2(w.wymagany)));
-      tytulHover(gw, "Czynsz wymagany, żeby pula obeszła się bez dokładania: "
+      tytulHover(gw, (w.pula === "spoleczna"
+        ? "Czynsz, przy którym kredyt uniósłby lukę kapitałową tej puli: "
+        : "Czynsz pokrywający koszty bieżące tej puli: ")
         + zl2(w.wymagany) + " zł/m²/mies.");
     } else {
       svg.appendChild(el("text", {x:L, y:gora+36, class:"os", fill:"var(--zle)"},
@@ -677,6 +679,13 @@ function rysujCzynsz(c){
     q.className = "pytanie";
     q.textContent = c.pytanie;
     podpis.appendChild(q);
+  }
+  if (c.zastrzezenie_do_wymaganego){
+    const z2 = document.createElement("div");
+    z2.className = c.czynsz_domykajacy_hipotetyczny ? "komunikat pilne" : "komunikat";
+    z2.style.marginTop = "8px";
+    z2.textContent = c.zastrzezenie_do_wymaganego;
+    podpis.appendChild(z2);
   }
   const zProgiem = wiersze.find(w => w.prog_sasiedni);
   if (zProgiem){

@@ -66,6 +66,14 @@ def kredyt_maksymalny_obslugiwalny(
     okresy_splaty = k.okres_lat - k.karencja_lat
     if k.okres_lat <= 0 or okresy_splaty <= 0:
         return ZERO
+    # `udzial_docelowy` w trybie automatycznym nie wyznacza KWOTY — ta bierze sie
+    # z udzwigu czynszu — ale nadal rozstrzyga, czy kredyt w ogole wchodzi w gre.
+    # Bez tego warunku silnik przyjmowal kredyt, ktorego reszta modelu nie widziala:
+    # `kredyt_aktywny` szedl za `udzial_docelowy`, wiec projekcja liczyla sciezke
+    # grantowa, nie naliczala raty i skracala okres powierzenia. Kredyt obnizal
+    # wymagany wklad, a nikt go nie splacal.
+    if not k.aktywny:
+        return ZERO
 
     # Projekcja bez kredytu daje przychody i koszty biezace — obie wielkosci
     # nie zaleza od kwoty kredytu, wiec wystarczy policzyc je raz.
@@ -263,6 +271,44 @@ class Wynik:
         return na_m2(
             self.finansowanie.wklad_gotowkowy_wymagany, self.wejscie.powierzchnie.pum_laczne
         )
+
+    @property
+    def luka_poza_zasiegiem_czynszu(self) -> Decimal:
+        """Czesc luki kapitalowej, ktorej zaden czynsz nie domknie.
+
+        Czynsz zamienia sie na kapital poczatkowy wylacznie przez kredyt, a ten
+        przysluguje tylko puli spolecznej (art. 5a ust. 3) i tylko do wysokosci
+        JEJ wlasnej potrzeby. Luka puli komunalnej zostaje wiec poza zasiegiem
+        stawki czynszu — pokryje ja kapital albo wyzsza dotacja, i tyle zostanie
+        do wylozenia nawet przy czynszu domykajacym.
+        """
+        laczna = (
+            self.alokacja.koszty_laczne
+            - self.finansowanie.grant_laczny
+            - self.finansowanie.partycypacja_laczna
+            - self.finansowanie.wklad_rzeczowy_laczny
+        )
+        # Wklad rzeczowy TEJ puli — dokladnie ta sama wielkosc, ktora ogranicza
+        # kredyt w `kredyt_maksymalny_obslugiwalny`. Uzycie wkladu lacznego
+        # zawyzyloby zasieg czynszu o czesc przypadajaca puli komunalnej.
+        spoleczna = (
+            self.alokacja.spoleczna.koszty_przedsiewziecia
+            - self.finansowanie.spoleczna.grant
+            - self.finansowanie.spoleczna.partycypacja
+            - self.finansowanie.spoleczna.wklad_rzeczowy
+        )
+        return max(ZERO, laczna - max(ZERO, spoleczna))
+
+    @property
+    def czynsz_domykajacy_jest_hipotetyczny(self) -> bool:
+        """Czy stawka domykajaca opisuje kredyt, ktorego model nie przyjmie.
+
+        W trybie recznym kwote kredytu ustawia uzytkownik, wiec podniesienie
+        czynszu jej nie zmieni i stawka domykajaca niczego nie domyka — opisuje
+        wariant hipotetyczny. W trybie automatycznym jest osiagalna w czesci
+        spolecznej, ale i tam zostaje `luka_poza_zasiegiem_czynszu`.
+        """
+        return self.wejscie.przelaczniki.tryb_kredytu is TrybKredytu.RECZNY
 
     @property
     def czynsz_wymagany_komunalna(self) -> Optional[Decimal]:

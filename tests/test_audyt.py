@@ -189,3 +189,150 @@ class TestProguArt7c:
             for w in api._czynsz_poziomy(r)["wiersze"]:
                 if w["prog_sasiedni"]:
                     assert w["prog_sasiedni"]["limit_po_progu"] < w["limit"]
+
+
+class TestKwotyKredytu:
+    """Kredyt liczony automatycznie — co go ogranicza i czy jest obslugiwany."""
+
+    def test_tryb_automatyczny_jest_domyslny(self):
+        from sim_kalkulator.dane import Przelaczniki, TrybKredytu
+
+        assert Przelaczniki().tryb_kredytu is TrybKredytu.AUTOMATYCZNY
+        assert wspolne.wejscie().przelaczniki.tryb_kredytu is TrybKredytu.AUTOMATYCZNY
+
+    def test_kwota_nie_pochodzi_z_udzialu_docelowego(self):
+        # W trybie automatycznym `udzial_docelowy` nie wyznacza kwoty.
+        for udzial in (0.10, 0.40, 0.80):
+            r = przelicz(
+                wspolne.wejscie(pula_spoleczna__kredyt__udzial_docelowy=udzial, **APORT_GMINY)
+            )
+            wg_udzialu = r.alokacja.spoleczna.koszty_przedsiewziecia * D(str(udzial))
+            assert abs(r.finansowanie.kredyt_laczny - wg_udzialu) > D("1")
+
+    def test_ta_sama_kwota_niezaleznie_od_udzialu_docelowego(self):
+        kwoty = {
+            przelicz(
+                wspolne.wejscie(pula_spoleczna__kredyt__udzial_docelowy=u, **APORT_GMINY)
+            ).finansowanie.kredyt_laczny
+            for u in (0.10, 0.25, 0.60)
+        }
+        assert len(kwoty) == 1
+
+    def test_zerowy_udzial_wylacza_kredyt_zamiast_zostawiac_go_bez_obslugi(self):
+        # Regresja: silnik przyjmowal kredyt, a projekcja szla sciezka grantowa —
+        # rata nigdy nie byla naliczana, wiec kredyt obnizal wklad za darmo.
+        r = przelicz(
+            wspolne.wejscie(pula_spoleczna__kredyt__udzial_docelowy=0.0, **APORT_GMINY)
+        )
+        assert r.finansowanie.kredyt_laczny == D("0")
+        assert r.projekcja.spoleczna.sciezka == "grant"
+
+    def test_kazdy_przyjety_kredyt_jest_obslugiwany_w_projekcji(self):
+        for udzial in (0.0, 0.25, 0.80):
+            r = przelicz(
+                wspolne.wejscie(pula_spoleczna__kredyt__udzial_docelowy=udzial, **APORT_GMINY)
+            )
+            ma_kredyt = r.finansowanie.kredyt_laczny > 0
+            placi_rate = any(rok.obsluga_dlugu > 0 for rok in r.projekcja.spoleczna.lata)
+            assert ma_kredyt == placi_rate, f"udzial {udzial}"
+
+    def test_kwota_ograniczona_potrzeba_a_nie_udzwigiem_czynszu(self):
+        # Scenariusz odniesienia: dotacja, partycypacja i aport pokrywaja tyle,
+        # ze brakujaca reszta jest mniejsza niz to, co uniosłby czynsz.
+        r = przelicz(wspolne.wejscie(**APORT_GMINY))
+        f, a = r.finansowanie, r.alokacja
+        potrzebny = (
+            a.spoleczna.koszty_przedsiewziecia
+            - f.spoleczna.grant
+            - f.spoleczna.partycypacja
+            - f.spoleczna.wklad_rzeczowy
+        )
+        assert f.kredyt_laczny == pytest.approx(potrzebny)
+        assert f.kredyt_laczny < a.spoleczna.koszty_przedsiewziecia * D("0.80")
+
+
+class TestWplywuCzynszuNaWklad:
+    """Punkt 5 audytu — zaleznosc jest NIEROSNACA, nie scisle malejaca.
+
+    Podniesienie czynszu obniza wymagany wklad tylko dopoki wiaze udzwig
+    czynszowy. Gdy zwiazuje potrzeba — nikt nie zaciaga kredytu wiekszego niz
+    brakujaca reszta — dalsze podnoszenie stawki nic nie daje i wklad stoi.
+    """
+
+    STAWKI = [D(str(x)) for x in (8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32)]
+
+    def wklady(self, **zmiany):
+        wynikowe = []
+        for stawka in self.STAWKI:
+            r = przelicz(
+                wspolne.wejscie(
+                    pula_spoleczna__czynsz_zakladany_m2_mies=float(stawka), **zmiany
+                )
+            )
+            wynikowe.append((stawka, r.finansowanie.wklad_gotowkowy_wymagany))
+        return wynikowe
+
+    @pytest.mark.parametrize("zmiany", [{}, APORT_GMINY], ids=["nabycie", "aport_gminy"])
+    def test_wyzszy_czynsz_nigdy_nie_podnosi_wymaganego_wkladu(self, zmiany):
+        pary = self.wklady(**zmiany)
+        for (poprzednia, wcz), (biezaca, teraz) in zip(pary, pary[1:]):
+            assert teraz <= wcz + D("0.01"), (
+                f"wklad wzrosl z {wcz} do {teraz} przy podniesieniu czynszu "
+                f"z {poprzednia} do {biezaca}"
+            )
+
+    @pytest.mark.parametrize("zmiany", [{}, APORT_GMINY], ids=["nabycie", "aport_gminy"])
+    def test_w_zakresie_gdzie_wiaze_czynsz_wklad_scisle_maleje(self, zmiany):
+        pary = self.wklady(**zmiany)
+        malejace = [
+            (a, b) for (_, a), (_, b) in zip(pary, pary[1:]) if b < a
+        ]
+        assert len(malejace) >= 4, "czynsz nie jest dzwignia w zadnym zakresie"
+
+    @pytest.mark.parametrize("zmiany", [{}, APORT_GMINY], ids=["nabycie", "aport_gminy"])
+    def test_plateau_rowna_sie_luce_poza_zasiegiem_czynszu(self, zmiany):
+        # Gdy czynsz przestaje dzialac, zostaje dokladnie ta czesc luki, ktorej
+        # nie da sie zamienic na kredyt — pula komunalna go nie ma.
+        pary = self.wklady(**zmiany)
+        najnizszy = min(w for _, w in pary)
+        r = przelicz(
+            wspolne.wejscie(
+                pula_spoleczna__czynsz_zakladany_m2_mies=float(self.STAWKI[-1]), **zmiany
+            )
+        )
+        assert najnizszy == pytest.approx(r.luka_poza_zasiegiem_czynszu)
+
+    def test_czynsz_domykajacy_faktycznie_sprowadza_wklad_do_reszty(self):
+        r = przelicz(wspolne.wejscie(**APORT_GMINY))
+        domykajacy = r.czynsz_domykajacy_m2_mies
+        assert domykajacy is not None
+        po = przelicz(
+            wspolne.wejscie(
+                pula_spoleczna__czynsz_zakladany_m2_mies=float(round(domykajacy, 2)),
+                **APORT_GMINY,
+            )
+        )
+        assert po.finansowanie.wklad_gotowkowy_wymagany == pytest.approx(
+            r.luka_poza_zasiegiem_czynszu
+        )
+
+    def test_w_trybie_recznym_stawka_domykajaca_jest_oznaczona_jako_hipotetyczna(self):
+        r = przelicz(
+            wspolne.wejscie(przelaczniki__tryb_kredytu="reczny", **APORT_GMINY)
+        )
+        assert r.czynsz_domykajacy_jest_hipotetyczny is True
+        c = api._czynsz_poziomy(r)
+        assert "ustawiasz samodzielnie" in c["zastrzezenie_do_wymaganego"]
+
+    def test_w_trybie_recznym_czynsz_nie_zmienia_kredytu(self):
+        kwoty = {
+            przelicz(
+                wspolne.wejscie(
+                    przelaczniki__tryb_kredytu="reczny",
+                    pula_spoleczna__czynsz_zakladany_m2_mies=c,
+                    **APORT_GMINY,
+                )
+            ).finansowanie.kredyt_laczny
+            for c in (12.0, 22.0, 30.0)
+        }
+        assert len(kwoty) == 1

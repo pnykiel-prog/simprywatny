@@ -456,3 +456,75 @@ udziały i stanie się wspólnikiem" był prawdziwy, ale nie oddawał skali.
 
 Wynik traktować jako **rząd wielkości i sygnał ostrzegawczy**, nie jako ustalenie
 korporacyjne.
+
+---
+
+## 16. Co ogranicza kwotę kredytu — i dlaczego czynsz przestaje być dźwignią
+
+Kredyt liczony jest jako **największy, jaki uniesie założony czynsz** (rozdz. 2.2
+uzupełnienia UI), a nie z `pula_spoleczna.kredyt.udzial_docelowy`. Tryb
+automatyczny jest domyślny i to on obsługuje interfejs; przełącznik „ustal kredyt
+samodzielnie" jest wyłączony.
+
+Kwota jest ścinana przez **trzy ograniczenia, z których wiąże najniższe**. Na
+scenariuszu odniesienia (aport gminy, czynsz 22 zł):
+
+| Ograniczenie | Kwota |
+|---|---|
+| udźwig czynszowy — ile uniesie 22 zł | 7 536 580 zł |
+| limit ustawowy 80% kosztów puli społecznej | 16 268 000 zł |
+| **potrzeba — ile kredytu w ogóle brakuje** | **5 230 750 zł** |
+
+Wiąże potrzeba. Dotacja 16,05 mln zł, partycypacja 4,07 mln zł i aport 2,8 mln zł
+pokrywają razem 79% kosztów 29,05 mln zł — nikt nie zaciąga kredytu większego niż
+brakująca reszta. Stąd 18% kosztów, a nie 80%: to nie jest ograniczenie ustawowe
+ani czynszowe, tylko brak zapotrzebowania.
+
+### 16.1. Zależność czynsz → wkład własny jest NIEROSNĄCA, nie ściśle malejąca
+
+Podniesienie czynszu obniża wymagany wkład **dopóki wiąże udźwig czynszowy**.
+Gdy zaczyna wiązać potrzeba, dalsze podnoszenie stawki nic nie daje — kredyt już
+pokrywa całą brakującą resztę puli społecznej. Na scenariuszu odniesienia:
+
+| Czynsz | Kredyt | Wkład gotówkowy |
+|---|---|---|
+| 8 zł | 186 660 zł | 5 947 090 zł |
+| 12 zł | 2 525 867 zł | 3 607 883 zł |
+| 16 zł | 4 530 152 zł | 1 603 598 zł |
+| 20 zł | 5 230 750 zł | 903 000 zł |
+| 22–32 zł | 5 230 750 zł | **903 000 zł (bez zmian)** |
+
+Plateau nie jest błędem. Zostaje na nim dokładnie
+`Wynik.luka_poza_zasiegiem_czynszu` — luka puli komunalnej, której żaden czynsz
+nie domknie, bo pula komunalna nie ma kredytu (art. 5a ust. 3), a tylko kredyt
+zamienia przyszły czynsz na kapitał początkowy.
+
+Test regresji sprawdza **nierosnącość** w całym zakresie oraz ścisły spadek
+w części, gdzie wiąże udźwig. Test wymagający ścisłego spadku wszędzie byłby
+błędny — wymuszałby zaciąganie kredytu ponad potrzebę.
+
+### 16.2. „Czynsz wymagany" znaczy co innego w każdym wierszu
+
+- **pula społeczna** — stawka, przy której kredyt uniósłby lukę kapitałową całego
+  przedsięwzięcia (errata nr 1, rozdz. 5: czynsz społeczny domyka całość);
+- **pula komunalna** — stawka pokrywająca koszty bieżące. Zerowego wkładu nie da
+  się tam osiągnąć żadną stawką.
+
+Nawet w trybie automatycznym stawka domykająca **nie sprowadza wkładu do zera** —
+zostaje `luka_poza_zasiegiem_czynszu`. W trybie ręcznym jest dodatkowo
+hipotetyczna: kwotę kredytu ustawia użytkownik, więc podniesienie czynszu jej nie
+zmieni. Oba zastrzeżenia są teraz wypisane pod wykresem.
+
+### 16.3. Naprawiony błąd: kredyt bez obsługi
+
+Przy `udzial_docelowy = 0` w trybie automatycznym silnik przyjmował kredyt
+5 230 750 zł, ale `kredyt_aktywny` szedł za `udzial_docelowy`, więc projekcja
+liczyła ścieżkę **grantową**: bez raty, z 25-letnim okresem powierzenia, bez
+limitu z art. 28 ust. 2 pkt 2 i z progiem tolerancji 10% zamiast 20%. Kredyt
+obniżał wymagany wkład, a nikt go nie spłacał — wkład wychodził 903 tys. zł
+zamiast 6,13 mln zł.
+
+W trybie automatycznym `udzial_docelowy` nie wyznacza kwoty, ale nadal
+rozstrzyga, **czy kredyt w ogóle wchodzi w grę**. Zero znaczy teraz „bez
+kredytu", spójnie z resztą modelu. Test pilnuje, że każdy przyjęty kredyt jest
+obsługiwany w projekcji.

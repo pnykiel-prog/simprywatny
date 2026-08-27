@@ -420,8 +420,16 @@ def _czynsz_poziomy(r: Wynik) -> Dict[str, Any]:
             r.czynsz_wymagany_komunalna, None,
         ))
 
+    # Stawka domykajaca nie domyka wszystkiego: luka puli komunalnej zostaje poza
+    # zasiegiem czynszu, bo tam nie ma kredytu, ktory zamienilby przyszly czynsz
+    # na kapital poczatkowy. Etykieta "wymagany" bez tego zastrzezenia obiecuje
+    # wiecej, niz stawka moze dac.
+    poza_zasiegiem = r.luka_poza_zasiegiem_czynszu
     return {
         "wiersze": wiersze,
+        "poza_zasiegiem_czynszu": _liczba(poza_zasiegiem),
+        "czynsz_domykajacy_hipotetyczny": r.czynsz_domykajacy_jest_hipotetyczny,
+        "zastrzezenie_do_wymaganego": _zastrzezenie_do_wymaganego(r, poza_zasiegiem),
         "rynek_podano": rynek.podano,
         "rynek_zrodlo": rynek.zrodlo,
         "rynek_data": rynek.data.isoformat() if rynek.data else None,
@@ -429,6 +437,23 @@ def _czynsz_poziomy(r: Wynik) -> Dict[str, Any]:
         "ocena_rynkowa": _ocena_rynkowa(wymagany_s, rynkowy),
         "zdanie": _zdanie_czynszowe(wiersze),
     }
+
+
+def _zastrzezenie_do_wymaganego(r: Wynik, poza_zasiegiem: Decimal) -> str:
+    """Co "czynsz wymagany" znaczy naprawde i czego nie obejmuje."""
+    if r.czynsz_domykajacy_jest_hipotetyczny:
+        return (
+            "Kredyt ustawiasz samodzielnie, więc podniesienie czynszu go nie zmieni — "
+            "stawka wymagana opisuje wariant, w którym kredyt dopasowałby się do luki. "
+            "Przełącz kredyt na automatyczny, żeby ta liczba była osiągalna."
+        )
+    if poza_zasiegiem > ZERO:
+        return (
+            f"Nawet przy tej stawce zostaje {_kwota_slownie(poza_zasiegiem)} do wyłożenia: "
+            "mieszkania komunalne nie mają kredytu, więc ich brakującego kapitału nie da "
+            "się zamienić na czynsz."
+        )
+    return ""
 
 
 def _pytanie_rynkowe(wymagany: Optional[Decimal]) -> str:
