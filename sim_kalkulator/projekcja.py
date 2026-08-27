@@ -113,42 +113,18 @@ class Finansowanie:
 
     @property
     def wklad_rzeczowy_gminy_laczny(self) -> Decimal:
+        """Zostaje w modelu, choc po zawezeniu zakresu jest zawsze zerem.
+
+        Aport gminy zostal usuniety z listy form (pakiet nr 2, rozdz. 11), wiec
+        zadna dopuszczalna forma nie wnosi gruntu ze strony gminy. Pole zostaje,
+        bo rozroznienie "czyj wklad rzeczowy" jest potrzebne przy aporcie
+        inwestora — i bo bez niego rozsadny zysk liczylby sie od cudzego kapitalu.
+        """
         return self.spoleczna.wklad_rzeczowy_gminy + self.komunalna.wklad_rzeczowy_gminy
 
     @property
     def wklad_rzeczowy_laczny(self) -> Decimal:
         return self.wklad_rzeczowy_inwestora_laczny + self.wklad_rzeczowy_gminy_laczny
-
-    @property
-    def kapital_spolki(self) -> Decimal:
-        """Kapital wniesiony do spolki lacznie — przez inwestora i przez gmine.
-
-        Suma tego, czym domknieto koszty poza dotacja, kredytem i partycypacja:
-        gotowka inwestora, jego wklad rzeczowy i aport gminy.
-        """
-        return max(ZERO, self.wklad_gotowkowy_wymagany) + self.wklad_rzeczowy_laczny
-
-    @property
-    def kapital_gminy(self) -> Decimal:
-        return self.wklad_rzeczowy_gminy_laczny
-
-    @property
-    def kapital_inwestora_w_spolce(self) -> Decimal:
-        return max(ZERO, self.wklad_gotowkowy_wymagany) + self.wklad_rzeczowy_inwestora_laczny
-
-    @property
-    def udzial_gminy_w_spolce(self) -> Optional[Decimal]:
-        """Udzial gminy w kapitale spolki. None, gdy gmina niczego nie wnosi.
-
-        Aport gminy nie jest tylko pozycja finansowania — za wniesiony grunt gmina
-        obejmuje udzialy. Przy tej konstrukcji o proporcji nie decyduje niczyja
-        wola, tylko relacja wartosci dzialki do kapitalu, ktory musi wylozyc
-        inwestor. Powyzej polowy gmina ma wiekszosc na zgromadzeniu wspolnikow.
-        """
-        razem = self.kapital_spolki
-        if self.kapital_gminy <= ZERO or razem <= ZERO:
-            return None
-        return self.kapital_gminy / razem
 
     @property
     def wklad_gotowkowy_wymagany(self) -> Decimal:

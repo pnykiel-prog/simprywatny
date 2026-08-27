@@ -227,8 +227,8 @@ class TestGrunt:
     def test_aport_z_hipoteka_odpada_takze_bez_kredytu(self):
         with pytest.raises(BladWalidacji, match="hipoteka"):
             wspolne.wejscie(
-                grunt__pochodzenie="gmina",
-                grunt__forma="aport_gminy",
+                grunt__pochodzenie="inwestor",
+                grunt__forma="aport_inwestora",
                 grunt__obciazony_hipoteka=True,
                 pula_spoleczna__kredyt__udzial_docelowy=0.0,
             )
@@ -357,9 +357,11 @@ class TestMatrycaGruntu:
         bez_pasma = {f.value for f in FormaGruntu if not f.daje_pasmo_45}
         assert bez_pasma == {"dzierzawa"}
 
-    def test_aportowe_to_dwie_formy(self):
+    def test_aport_inwestora_jest_jedyna_forma_aportowa(self):
+        # Aport gminy usuniety z zakresu — pakiet nr 2, rozdz. 11. Logika aportu
+        # zostaje, bo aport inwestora nadal istnieje.
         aportowe = {f.value for f in FormaGruntu if f.wniesiony_aportem}
-        assert aportowe == {"aport_inwestora", "aport_gminy"}
+        assert aportowe == {"aport_inwestora"}
 
 
 class TestPrzelaczniki:

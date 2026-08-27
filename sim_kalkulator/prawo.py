@@ -149,7 +149,19 @@ GRUNT_APORT_LIMIT_W_KOSZTACH_KREDYT = Decimal("0.20")
 #       dopuszczalna rekompensate        (art. 5 ust. 9 pkt 4 u.f.w.),
 #   D — zapotrzebowanie na gotowke: czy wklad inwestora jest pieniezny,
 #       czy rzeczowy                     (poza przepisem — klasyfikacja modelu).
-# Kanal piaty, poza obliczeniami: aport gminy czyni ja wspolnikiem spolki.
+#
+# ZAWEZENIE ZAKRESU (pakiet naprawczy nr 2, rozdz. 11): aport dzialki przez gmine
+# zostal usuniety z listy form. Gmina obejmuje wtedy udzialy — przy dzialce
+# porownywalnej z wkladem inwestora wychodzi jej wiekszosc — a wraz z nia stawki
+# czynszu ustala zgromadzenie wspolnikow (art. 28 ust. 1 ustawy z 26.10.1995).
+# Suwak czynszu przestaje byc dzwignia inwestora, glowna liczba wyjsciowa traci
+# sens, a wykres negocjacyjny nie ma z kim negocjowac. To nie jest wariant
+# prywatnego SIM z komplikacja, tylko inny podmiot — narzedzie odpowiadaloby
+# poprawnie na pytanie, ktorego nikt nie zadal.
+#
+# Kolumna E ("gmina wspolnikiem") zostaje w matrycy pusta we wszystkich wierszach.
+# Nie usuwam jej: aport inwestora nadal istnieje, wiec logika aportu zyje, a gdyby
+# zakres kiedys wrocil, wiersz da sie dopisac bez przebudowy struktury.
 
 # Oznaczenia pewnosci wg rozdz. 3 uzupelnienia nr 2.
 PEWNOSC_ZRODLO = "Z"             # odczytane wprost w przepisie
@@ -311,23 +323,6 @@ MATRYCA_GRUNTU: Tuple[SkutkiFormyGruntu, ...] = (
         ),
     ),
     SkutkiFormyGruntu(
-        forma="aport_gminy",
-        pochodzenie=POCHODZENIE_GMINA,
-        pasmo_45=True, pasmo_45_pewnosc=PEWNOSC_WNIOSEK,
-        wartosc_w_kosztach=True, limit_aportowy=True,
-        wartosc_w_kosztach_pewnosc=PEWNOSC_WNIOSEK,
-        przychod_uoig=True, przychod_uoig_pewnosc=PEWNOSC_ZRODLO,
-        przelacznik_przychodu="",
-        wydatek=WYDATEK_BRAK,
-        gmina_wspolnikiem=True,
-        etykieta="Gmina wnosi aportem",
-        podpis=(
-            "Gmina obejmuje udziały w spółce i staje się wspólnikiem. "
-            "Zmniejsza też dopuszczalną pomoc publiczną."
-        ),
-        podstawa="art. 5 ust. 9 pkt 4 ustawy z 8.12.2006; § 12 ust. 7 rozp. t.j. Dz.U. 2021 poz. 766",
-    ),
-    SkutkiFormyGruntu(
         forma="uzytkowanie_wieczyste",
         pochodzenie=POCHODZENIE_GMINA,
         pasmo_45=True, pasmo_45_pewnosc=PEWNOSC_ZRODLO,
@@ -452,16 +447,6 @@ PUM_LOKALU_MIN_M2 = Decimal("25")          # § standardow, rozp. 457
 PUM_LOKALU_MAX_M2 = Decimal("80")          # powyzej wylacznie dla rodzin wielodzietnych
 DZWIG_OBOWIAZKOWY_OD_KONDYGNACJI = 3       # kondygnacje naziemne
 DROGA_PUBLICZNA_MIN_SZEROKOSC_M = Decimal("6")
-
-# --------------------------------------------------------------------------
-# Skutek ustrojowy aportu gminy
-# --------------------------------------------------------------------------
-
-# Prog wiekszosci na zgromadzeniu wspolnikow. Nie pochodzi z ustaw o wsparciu
-# mieszkalnictwa, tylko z prawa spolek — art. 245 k.s.h. wymaga bezwzglednej
-# wiekszosci glosow dla uchwal, o ile umowa spolki nie stanowi inaczej.
-# Model traktuje go jako granice kontroli nad spolka.
-WIEKSZOSC_UDZIALOW = Decimal("0.50")
 
 # --------------------------------------------------------------------------
 # Higiena danych wejsciowych (nie jest to stala ustawowa — patrz rozdz. 4 spec.)

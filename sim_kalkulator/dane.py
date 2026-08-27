@@ -102,7 +102,12 @@ class FormaGruntu(str, Enum):
     NABYCIE_PRYWATNE = "nabycie_prywatne"
     NABYCIE_OD_GMINY = "nabycie_od_gminy"
     LOKAL_ZA_GRUNT = "lokal_za_grunt"
-    APORT_GMINY = "aport_gminy"
+    # APORT_GMINY usuniety — pakiet naprawczy nr 2, rozdz. 11. Gmina obejmowala
+    # wtedy udzialy, a przy dzialce porownywalnej z wkladem inwestora wychodzila
+    # jej wiekszosc. Wraz z nia stawki czynszu ustala zgromadzenie wspolnikow
+    # (art. 28 ust. 1 ustawy z 26.10.1995), wiec suwak czynszu przestaje byc
+    # dzwignia inwestora, a glowna liczba wyjsciowa — wymagany wklad inwestora —
+    # traci sens. To nie prywatny SIM z komplikacja, tylko inny podmiot.
     UZYTKOWANIE_WIECZYSTE = "uzytkowanie_wieczyste"
     DZIERZAWA = "dzierzawa"
 

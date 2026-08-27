@@ -68,11 +68,19 @@ class TestKanaluD:
         assert u.wklad_rzeczowy_inwestora > D("0")
         assert u.wklad_rzeczowy_gminy == D("0")
 
-    def test_aport_gminy_to_wklad_gminy_nie_inwestora(self):
-        u = rozstrzygnij(grunt__forma="aport_gminy")
-        assert u.wklad_rzeczowy_inwestora == D("0")
-        assert u.wklad_rzeczowy_gminy > D("0")
-        assert u.gmina_wspolnikiem is True
+    def test_zadna_dopuszczalna_forma_nie_wnosi_gruntu_od_gminy(self):
+        # Aport gminy usuniety z zakresu (pakiet nr 2, rozdz. 11), wiec kanal D
+        # nie ma juz wariantu, w ktorym wklad rzeczowy jest po stronie gminy.
+        for pochodzenie, forma, dodatki in (
+            ("inwestor", "aport_inwestora", {}),
+            ("inwestor", "spolka_wlascicielem", {}),
+            ("gmina", "nabycie_od_gminy", {}),
+            ("gmina", "uzytkowanie_wieczyste", {}),
+            ("gmina", "dzierzawa", {}),
+        ):
+            u = rozstrzygnij(grunt__pochodzenie=pochodzenie, grunt__forma=forma, **dodatki)
+            assert u.wklad_rzeczowy_gminy == D("0"), forma
+            assert u.gmina_wspolnikiem is False, forma
 
     def test_bonifikata_obniza_wydatek_niezaleznie_od_pasma(self):
         # Cena rzeczywiscie placona zmienia zapotrzebowanie na gotowke takze wtedy,
@@ -81,15 +89,17 @@ class TestKanaluD:
         assert u.wydatek_gotowkowy == D("1400000.00")
         assert u.wartosc_do_pasma == u.wartosc_operatu
 
-    def test_aport_gminy_nie_nalicza_inwestorowi_rozsadnego_zysku(self):
-        wlasny = przelicz(
+    def test_rozsadny_zysk_liczy_sie_od_kapitalu_inwestora(self):
+        # Po zawezeniu zakresu wklad rzeczowy gminy jest zawsze zerem, wiec
+        # kapital inwestora rowna sie calemu wkladowi wlasnemu. Rozroznienie
+        # zostaje w modelu, bo bez niego rozsadny zysk liczylby sie od cudzego
+        # kapitalu, gdyby zakres kiedys wrocil.
+        r = przelicz(
             wspolne.wejscie(grunt__pochodzenie="inwestor", grunt__forma="aport_inwestora")
         )
-        gminny = przelicz(wspolne.wejscie(grunt__forma="aport_gminy"))
-        assert (
-            gminny.finansowanie.spoleczna.kapital_inwestora
-            < wlasny.finansowanie.spoleczna.kapital_inwestora
-        )
+        f = r.finansowanie.spoleczna
+        assert f.wklad_rzeczowy_gminy == D("0")
+        assert f.kapital_inwestora == f.wklad_wlasny
 
     def test_kredyt_nie_doplaca_do_wkladu_rzeczowego_puli(self):
         # Bez odjecia wkladu rzeczowego od zapotrzebowania puli kredyt

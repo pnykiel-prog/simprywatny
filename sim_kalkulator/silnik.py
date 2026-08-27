@@ -237,7 +237,6 @@ class Wynik:
     def ostrzezenia(self) -> Tuple[Ostrzezenie, ...]:
         return (
             tuple(self.wejscie.ostrzezenia)
-            + ostrzezenie_o_udzialach(self)
             + self.grunt.ostrzezenia
             + self.granty.ostrzezenia
             + self.rekompensata.ostrzezenia
@@ -361,52 +360,6 @@ class Wynik:
     @property
     def luka_kapitalowa_na_m2(self) -> Decimal:
         return na_m2(self.werdykty.montaz.luka_kwota, self.wejscie.powierzchnie.pum_laczne)
-
-
-def ostrzezenie_o_udzialach(r: "Wynik") -> Tuple[Ostrzezenie, ...]:
-    """Skutek ustrojowy aportu gminy, wyrazony w procentach kapitalu.
-
-    Komunikat "gmina obejmie udzialy i stanie sie wspolnikiem" jest prawdziwy,
-    ale nie oddaje skali. O proporcji nie decyduje niczyja wola, tylko relacja
-    wartosci dzialki do kapitalu, ktory musi wylozyc inwestor — a ta przy drogim
-    gruncie i wysokiej dotacji potrafi dac gminie wiekszosc. Powyzej polowy gmina
-    decyduje na zgromadzeniu wspolnikow, takze o stawkach czynszu, i wtedy nie
-    jest to juz prywatny SIM.
-    """
-    udzial = r.finansowanie.udzial_gminy_w_spolce
-    if udzial is None:
-        return ()
-    wiekszosc = udzial > prawo.WIEKSZOSC_UDZIALOW
-    kwota_gminy = r.finansowanie.kapital_gminy
-    kwota_inwestora = r.finansowanie.kapital_inwestora_w_spolce
-    tresc = (
-        f"Gmina wnosi aportem {kwota_gminy:.2f} zl, inwestor {kwota_inwestora:.2f} zl, "
-        f"wiec gmina obejmuje {udzial:.1%} kapitalu spolki."
-    )
-    if wiekszosc:
-        tresc += (
-            f" To wiecej niz polowa: gmina ma wiekszosc na zgromadzeniu wspolnikow "
-            "i decyduje miedzy innymi o stawkach czynszu. Przy takiej proporcji "
-            "przedsiewziecie przestaje byc prywatnym SIM."
-        )
-    return (
-        Ostrzezenie(
-            kod="UDZIAL_GMINY_W_SPOLCE",
-            tresc=tresc,
-            podstawa="skutek ustrojowy aportu — poza obliczeniami montazu",
-            tresc_potoczna=(
-                f"Za wniesioną działkę gmina obejmie {udzial:.0%} udziałów w spółce."
-                + (
-                    " Ma wtedy większość i decyduje o czynszach — to już nie jest "
-                    "prywatny SIM. Rozliczenie „lokal za grunt” daje tę samą działkę "
-                    "bez obejmowania udziałów."
-                    if wiekszosc
-                    else " Zachowujesz kontrolę nad spółką."
-                )
-            ),
-            waga=Waga.ZMIENIA_WERDYKT if wiekszosc else Waga.ZMIENIA_KWOTE,
-        ),
-    )
 
 
 @dataclass(frozen=True)

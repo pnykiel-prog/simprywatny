@@ -126,7 +126,6 @@ class TestKanaluA:
             ("inwestor", "spolka_wlascicielem", {}),
             ("rynek_prywatny", "nabycie_prywatne", {}),
             ("gmina", "nabycie_od_gminy", {}),
-            ("gmina", "aport_gminy", {}),
             ("gmina", "uzytkowanie_wieczyste", {"grunt__oplata_roczna": 150000.0}),
         ],
     )

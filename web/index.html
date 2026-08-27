@@ -118,8 +118,9 @@ details summary{cursor:pointer;font-size:12px;font-weight:600;color:var(--akcent
 .grunt-skutki{font-size:11px;color:var(--tekst-3);margin-top:8px;line-height:1.4}
 /* Przekroczenie połowy kapitału jest zmianą ustrojową, nie niuansem. */
 .podswietlony{outline:2px solid var(--akcent);outline-offset:5px;border-radius:5px}
-.alarm{background:var(--pasmo-zle);border-left:4px solid var(--zle);border-radius:0 5px 5px 0;
-  padding:7px 10px;margin-top:7px;font-size:11.5px;line-height:1.4;color:var(--tekst);font-weight:600}
+/* Forma poza zakresem narzędzia — widoczna, ale nie do wybrania. */
+.forma-wylaczona{border:1px dashed var(--linia-mocna);border-radius:5px;padding:7px 10px;
+  font-size:11px;line-height:1.4;color:var(--tekst-3);background:var(--tlo)}
 
 /* ---------- porownanie form gruntu ---------- */
 .porownanie{display:grid;gap:5px;margin-top:4px}
@@ -1072,11 +1073,16 @@ function rysujGrunt(z){
     </div>`).join("");
 
   // Zdania o skutkach składa silnik — niosą progi ustawowe i kwoty.
-  $("#grunt-skutki").innerHTML = g.biezace.opisy.map(x => "• " + x).join("<br>")
-    + (g.biezace.gmina_ma_wiekszosc
-        ? `<div class="alarm">Gmina obejmuje ${proc(g.biezace.udzial_gminy_w_spolce)}
-             kapitału spółki — większość na zgromadzeniu wspólników.</div>`
-        : "");
+  $("#grunt-skutki").innerHTML = g.biezace.opisy.map(x => "• " + x).join("<br>");
+
+  // Aport działki przez gminę został usunięty z zakresu narzędzia, ale nie po
+  // cichu: gmina zaproponuje go, bo dla niej to najprostsze rozwiązanie, więc
+  // inwestor przy stole ma dostać gotową odpowiedź wraz z alternatywą, a nie
+  // puste miejsce w interfejsie.
+  if (g.pochodzenie === "gmina" && g.wylaczone && g.wylaczone.length){
+    $("#grunt-formy").insertAdjacentHTML("beforeend", g.wylaczone.map(x =>
+      `<div class="forma-wylaczona">${x}</div>`).join(""));
+  }
 
   $("#grunt-pochodzenia").querySelectorAll(".pochodzenie").forEach((btn) => {
     btn.addEventListener("click", () => {

@@ -782,31 +782,11 @@ def _grunt_json(r: Wynik) -> Dict[str, Any]:
         "wklad_rzeczowy": _liczba(u.wklad_rzeczowy_laczny),
         "oplata_roczna": _liczba(u.oplata_roczna),
         "gmina_wspolnikiem": u.gmina_wspolnikiem,
-        # Skutek ustrojowy wyrazony w procentach kapitalu — sam komunikat
-        # "gmina stanie sie wspolnikiem" nie oddaje skali.
-        "udzial_gminy_w_spolce": _liczba(r.finansowanie.udzial_gminy_w_spolce),
-        "gmina_ma_wiekszosc": (
-            r.finansowanie.udzial_gminy_w_spolce is not None
-            and r.finansowanie.udzial_gminy_w_spolce > prawo.WIEKSZOSC_UDZIALOW
-        ),
-        "kapital_gminy": _liczba(r.finansowanie.kapital_gminy),
-        "kapital_inwestora": _liczba(r.finansowanie.kapital_inwestora_w_spolce),
         "pum_dla_gminy": _liczba(u.pum_dla_gminy),
         "grant_utracony": _liczba(r.granty.spoleczna.grant_utracony),
         "utracony_przez_forme": r.granty.spoleczna.utracony_przez_forme_gruntu,
         "opis": u.opis_kanalow,
     }
-    if u.gmina_wspolnikiem and r.finansowanie.udzial_gminy_w_spolce is not None:
-        udzial = r.finansowanie.udzial_gminy_w_spolce
-        zdanie = f"Gmina obejmuje {udzial:.0%} udziałów w spółce."
-        if udzial > prawo.WIEKSZOSC_UDZIALOW:
-            zdanie += (
-                " Ma większość na zgromadzeniu wspólników i decyduje o stawkach czynszu."
-            )
-        else:
-            zdanie += " Kontrola nad spółką zostaje po Twojej stronie."
-        opisy.append(zdanie)
-
     if u.rozliczany_lokalami:
         biezace["koszt_metra_oddanych_lokali"] = _liczba(
             w.grunt.koszt_lokali_dla_gminy_na_m2
@@ -829,8 +809,26 @@ def _grunt_json(r: Wynik) -> Dict[str, Any]:
             for pochodzenie in prawo.POCHODZENIA_GRUNTU
         },
         "pola": pola,
+        # Formy swiadomie poza zakresem — pokazane, nie przemilczane.
+        "wylaczone": _formy_poza_zakresem(w.grunt.pochodzenie.value),
         "biezace": biezace,
     }
+
+
+def _formy_poza_zakresem(pochodzenie: str) -> list:
+    """Warianty usuniete z zakresu narzedzia, z powodem i alternatywa.
+
+    Pakiet naprawczy nr 2, rozdz. 11.4: nie kasowac po cichu. Gmina zaproponuje
+    aport, bo dla niej to najprostsze rozwiazanie — inwestor przy stole ma wtedy
+    dostac gotowa odpowiedz wraz z alternatywa, zamiast pustego miejsca.
+    """
+    if pochodzenie != prawo.POCHODZENIE_GMINA:
+        return []
+    return [
+        "Aport działki przez gminę nie jest liczony — gmina obejmuje wtedy udziały "
+        "i przestaje to być prywatny SIM. Ten sam grunt bez tego skutku daje tryb "
+        "„lokal za grunt”."
+    ]
 
 
 def _uwagi_wariantu(w) -> list:
@@ -841,11 +839,7 @@ def _uwagi_wariantu(w) -> list:
             f"dotacja ścięta do {prawo.GRANT_SPOLECZNY_PROG_GRUNTOWY:.0%} kosztów"
         )
     if w.gmina_wspolnikiem:
-        uwagi.append(
-            f"gmina obejmuje {w.udzial_gminy_w_spolce:.0%} udziałów"
-            if w.udzial_gminy_w_spolce is not None
-            else "gmina wspólnikiem spółki"
-        )
+        uwagi.append("gmina wspólnikiem spółki")
     if w.oplata_roczna > ZERO:
         uwagi.append(f"opłata {_kwota_slownie(w.oplata_roczna)} rocznie")
     if not w.domyka_sie:
@@ -874,7 +868,6 @@ def porownanie_json(r: Wynik) -> Dict[str, Any]:
                 "oplata_roczna": _liczba(w.oplata_roczna),
                 "domyka_sie": w.domyka_sie,
                 "gmina_wspolnikiem": w.gmina_wspolnikiem,
-                "udzial_gminy_w_spolce": _liczba(w.udzial_gminy_w_spolce),
                 "pasmo_45": w.pasmo_45,
                 "uwagi": _uwagi_wariantu(w),
             }
@@ -1106,15 +1099,6 @@ def _dzwignia_poza_osia(w, numer: Optional[int]) -> Dict[str, Any]:
     """
     if numer is None:
         return {}
-    if numer == 3 and w.grunt.forma.skutki.gmina_wspolnikiem:
-        return {
-            "opis": (
-                "Grunt wniesiony przez gminę liczy się jako Twój przychód i obniża limit "
-                "pomocy publicznej niezależnie od proporcji mieszkań."
-            ),
-            "dzialanie": "Zmień formę działki",
-            "cel": "grunt",
-        }
     if numer == 3:
         return {
             "opis": (

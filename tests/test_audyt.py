@@ -13,7 +13,10 @@ from sim_kalkulator.silnik import przelicz
 
 from . import wspolne
 
-APORT_GMINY = dict(grunt__pochodzenie="gmina", grunt__forma="aport_gminy")
+# Aport gminy zostal usuniety z zakresu (pakiet nr 2, rozdz. 11). Wklad rzeczowy
+# w gruncie bada teraz aport INWESTORA — ta sama gałąź obliczeniowa, ten sam
+# rozjazd miedzy wkladem brutto a gotowkowym, bez skutku ustrojowego.
+APORT = dict(grunt__pochodzenie="inwestor", grunt__forma="aport_inwestora")
 
 
 def kody(r):
@@ -44,48 +47,56 @@ class TestBazaDotacjiJakoZalozenie:
         )
 
 
-class TestPodzialuUdzialow:
-    """Punkt 4 — aport gminy wyrazony w procentach kapitalu spolki."""
+class TestUsunietegoAportuGminy:
+    """Pakiet nr 2, rozdz. 11 — wariant usuniety z zakresu, ale nie po cichu."""
 
-    def test_aport_gminy_daje_wyliczony_udzial(self):
-        r = przelicz(wspolne.wejscie(**APORT_GMINY))
-        udzial = r.finansowanie.udzial_gminy_w_spolce
-        assert udzial is not None
-        assert D("0") < udzial < D("1")
+    def test_aport_gminy_nie_jest_dopuszczalna_forma(self):
+        from sim_kalkulator.dane import BladWalidacji, FormaGruntu
 
-    def test_udzial_to_aport_do_calego_kapitalu(self):
-        r = przelicz(wspolne.wejscie(**APORT_GMINY))
-        f = r.finansowanie
-        assert f.udzial_gminy_w_spolce == pytest.approx(
-            f.kapital_gminy / (f.kapital_gminy + f.kapital_inwestora_w_spolce)
+        assert "aport_gminy" not in {f.value for f in FormaGruntu}
+        with pytest.raises(BladWalidacji, match="nieznana wartosc"):
+            wspolne.wejscie(grunt__pochodzenie="gmina", grunt__forma="aport_gminy")
+
+    def test_zadna_forma_nie_czyni_gminy_wspolnikiem(self):
+        assert [w.forma for w in prawo.MATRYCA_GRUNTU if w.gmina_wspolnikiem] == []
+
+    def test_dzialka_gminy_ma_cztery_formy(self):
+        assert prawo.formy_dla_pochodzenia("gmina") == (
+            "nabycie_od_gminy", "lokal_za_grunt", "uzytkowanie_wieczyste", "dzierzawa"
         )
 
-    def test_bez_aportu_gminy_nie_ma_podzialu(self):
+    def test_interfejs_wyjasnia_brak_zamiast_milczec(self):
+        # Gmina zaproponuje aport, bo dla niej to najprostsze — inwestor przy stole
+        # ma dostac gotowa odpowiedz wraz z alternatywa, a nie puste miejsce.
         r = przelicz(wspolne.wejscie())
-        assert r.finansowanie.udzial_gminy_w_spolce is None
-        assert "UDZIAL_GMINY_W_SPOLCE" not in kody(r)
+        wylaczone = api._grunt_json(r)["wylaczone"]
+        assert len(wylaczone) == 1
+        assert "lokal za grunt" in wylaczone[0]
+        assert "prywatny SIM" in wylaczone[0]
 
-    def test_wiekszosc_gminy_jest_ostrzezeniem_zmieniajacym_werdykt(self):
-        from sim_kalkulator.dane import Waga
+    def test_przy_gruncie_inwestora_nie_ma_tego_wyjasnienia(self):
+        r = przelicz(wspolne.wejscie(**APORT))
+        assert api._grunt_json(r)["wylaczone"] == []
 
-        r = przelicz(wspolne.wejscie(**APORT_GMINY))
-        assert r.finansowanie.udzial_gminy_w_spolce > prawo.WIEKSZOSC_UDZIALOW
-        o = next(o for o in r.ostrzezenia if o.kod == "UDZIAL_GMINY_W_SPOLCE")
-        assert o.waga is Waga.ZMIENIA_WERDYKT
-        assert "prywatny SIM" in o.dla_ekranu
+    def test_model_nie_liczy_juz_podzialu_udzialow(self):
+        from sim_kalkulator import projekcja
 
-    def test_tanszy_grunt_zostawia_kontrole_inwestorowi(self):
-        r = przelicz(wspolne.wejscie(grunt__wartosc=400000.0, **APORT_GMINY))
-        udzial = r.finansowanie.udzial_gminy_w_spolce
-        assert udzial < prawo.WIEKSZOSC_UDZIALOW
-        o = next(o for o in r.ostrzezenia if o.kod == "UDZIAL_GMINY_W_SPOLCE")
-        assert "Zachowujesz kontrolę" in o.dla_ekranu
+        assert not hasattr(projekcja.Finansowanie, "udzial_gminy_w_spolce")
+        assert not hasattr(prawo, "WIEKSZOSC_UDZIALOW")
 
-    def test_udzial_jedzie_do_interfejsu(self):
-        r = przelicz(wspolne.wejscie(**APORT_GMINY))
-        b = api._grunt_json(r)["biezace"]
-        assert b["gmina_ma_wiekszosc"] is True
-        assert any("udziałów" in x for x in b["opisy"])
+    def test_wklad_rzeczowy_gminy_jest_zawsze_zerem(self):
+        # Pole zostaje, bo rozroznienie "czyj wklad" jest potrzebne przy aporcie
+        # inwestora, ale zadna dopuszczalna forma go juz nie zasila.
+        for pochodzenie, forma, dodatki in (
+            ("inwestor", "aport_inwestora", {}),
+            ("gmina", "nabycie_od_gminy", {}),
+            ("gmina", "uzytkowanie_wieczyste", {}),
+            ("gmina", "dzierzawa", {}),
+        ):
+            r = przelicz(
+                wspolne.wejscie(grunt__pochodzenie=pochodzenie, grunt__forma=forma, **dodatki)
+            )
+            assert r.finansowanie.wklad_rzeczowy_gminy_laczny == D("0"), forma
 
 
 class TestBlokadyNiezaleznejOdOsi:
@@ -115,13 +126,9 @@ class TestBlokadyNiezaleznejOdOsi:
         dz = s["dzwignia_poza_osia"]
         assert dz["opis"] and dz["dzialanie"] and dz["cel"] in {"grunt", "dzwignie"}
 
-    def test_przy_aporcie_gminy_dzwignia_wskazuje_forme_dzialki(self):
-        _, s = api.obsluz(
-            "sweep", api.wczytaj_parametry(wspolne.WZORCOWY),
-            {"grunt.pochodzenie": "gmina", "grunt.forma": "aport_gminy"},
-        )
-        if s["blokada_niezalezna_od_osi"]:
-            assert s["dzwignia_poza_osia"]["cel"] == "grunt"
+    def test_dzwignia_wskazuje_konkretna_sekcje_interfejsu(self):
+        _, s = api.obsluz("sweep", api.wczytaj_parametry(wspolne.WZORCOWY), {})
+        assert s["dzwignia_poza_osia"]["cel"] in {"grunt", "dzwignie"}
 
 
 class TestEtykietyRekompensaty:
@@ -204,7 +211,7 @@ class TestKwotyKredytu:
         # W trybie automatycznym `udzial_docelowy` nie wyznacza kwoty.
         for udzial in (0.10, 0.40, 0.80):
             r = przelicz(
-                wspolne.wejscie(pula_spoleczna__kredyt__udzial_docelowy=udzial, **APORT_GMINY)
+                wspolne.wejscie(pula_spoleczna__kredyt__udzial_docelowy=udzial, **APORT)
             )
             wg_udzialu = r.alokacja.spoleczna.koszty_przedsiewziecia * D(str(udzial))
             assert abs(r.finansowanie.kredyt_laczny - wg_udzialu) > D("1")
@@ -212,7 +219,7 @@ class TestKwotyKredytu:
     def test_ta_sama_kwota_niezaleznie_od_udzialu_docelowego(self):
         kwoty = {
             przelicz(
-                wspolne.wejscie(pula_spoleczna__kredyt__udzial_docelowy=u, **APORT_GMINY)
+                wspolne.wejscie(pula_spoleczna__kredyt__udzial_docelowy=u, **APORT)
             ).finansowanie.kredyt_laczny
             for u in (0.10, 0.25, 0.60)
         }
@@ -222,7 +229,7 @@ class TestKwotyKredytu:
         # Regresja: silnik przyjmowal kredyt, a projekcja szla sciezka grantowa —
         # rata nigdy nie byla naliczana, wiec kredyt obnizal wklad za darmo.
         r = przelicz(
-            wspolne.wejscie(pula_spoleczna__kredyt__udzial_docelowy=0.0, **APORT_GMINY)
+            wspolne.wejscie(pula_spoleczna__kredyt__udzial_docelowy=0.0, **APORT)
         )
         assert r.finansowanie.kredyt_laczny == D("0")
         assert r.projekcja.spoleczna.sciezka == "grant"
@@ -230,7 +237,7 @@ class TestKwotyKredytu:
     def test_kazdy_przyjety_kredyt_jest_obslugiwany_w_projekcji(self):
         for udzial in (0.0, 0.25, 0.80):
             r = przelicz(
-                wspolne.wejscie(pula_spoleczna__kredyt__udzial_docelowy=udzial, **APORT_GMINY)
+                wspolne.wejscie(pula_spoleczna__kredyt__udzial_docelowy=udzial, **APORT)
             )
             ma_kredyt = r.finansowanie.kredyt_laczny > 0
             placi_rate = any(rok.obsluga_dlugu > 0 for rok in r.projekcja.spoleczna.lata)
@@ -239,7 +246,7 @@ class TestKwotyKredytu:
     def test_kwota_ograniczona_potrzeba_a_nie_udzwigiem_czynszu(self):
         # Scenariusz odniesienia: dotacja, partycypacja i aport pokrywaja tyle,
         # ze brakujaca reszta jest mniejsza niz to, co uniosłby czynsz.
-        r = przelicz(wspolne.wejscie(**APORT_GMINY))
+        r = przelicz(wspolne.wejscie(**APORT))
         f, a = r.finansowanie, r.alokacja
         potrzebny = (
             a.spoleczna.koszty_przedsiewziecia
@@ -272,7 +279,7 @@ class TestWplywuCzynszuNaWklad:
             wynikowe.append((stawka, r.finansowanie.wklad_gotowkowy_wymagany))
         return wynikowe
 
-    @pytest.mark.parametrize("zmiany", [{}, APORT_GMINY], ids=["nabycie", "aport_gminy"])
+    @pytest.mark.parametrize("zmiany", [{}, APORT], ids=["nabycie", "aport_inwestora"])
     def test_wyzszy_czynsz_nigdy_nie_podnosi_wymaganego_wkladu(self, zmiany):
         pary = self.wklady(**zmiany)
         for (poprzednia, wcz), (biezaca, teraz) in zip(pary, pary[1:]):
@@ -281,7 +288,7 @@ class TestWplywuCzynszuNaWklad:
                 f"z {poprzednia} do {biezaca}"
             )
 
-    @pytest.mark.parametrize("zmiany", [{}, APORT_GMINY], ids=["nabycie", "aport_gminy"])
+    @pytest.mark.parametrize("zmiany", [{}, APORT], ids=["nabycie", "aport_inwestora"])
     def test_w_zakresie_gdzie_wiaze_czynsz_wklad_scisle_maleje(self, zmiany):
         pary = self.wklady(**zmiany)
         malejace = [
@@ -289,7 +296,7 @@ class TestWplywuCzynszuNaWklad:
         ]
         assert len(malejace) >= 4, "czynsz nie jest dzwignia w zadnym zakresie"
 
-    @pytest.mark.parametrize("zmiany", [{}, APORT_GMINY], ids=["nabycie", "aport_gminy"])
+    @pytest.mark.parametrize("zmiany", [{}, APORT], ids=["nabycie", "aport_inwestora"])
     def test_plateau_rowna_sie_luce_poza_zasiegiem_czynszu(self, zmiany):
         # Gdy czynsz przestaje dzialac, zostaje dokladnie ta czesc luki, ktorej
         # nie da sie zamienic na kredyt — pula komunalna go nie ma.
@@ -303,13 +310,13 @@ class TestWplywuCzynszuNaWklad:
         assert najnizszy == pytest.approx(r.luka_poza_zasiegiem_czynszu)
 
     def test_czynsz_domykajacy_faktycznie_sprowadza_wklad_do_reszty(self):
-        r = przelicz(wspolne.wejscie(**APORT_GMINY))
+        r = przelicz(wspolne.wejscie(**APORT))
         domykajacy = r.czynsz_domykajacy_m2_mies
         assert domykajacy is not None
         po = przelicz(
             wspolne.wejscie(
                 pula_spoleczna__czynsz_zakladany_m2_mies=float(round(domykajacy, 2)),
-                **APORT_GMINY,
+                **APORT,
             )
         )
         assert po.finansowanie.wklad_gotowkowy_wymagany == pytest.approx(
@@ -318,7 +325,7 @@ class TestWplywuCzynszuNaWklad:
 
     def test_w_trybie_recznym_stawka_domykajaca_jest_oznaczona_jako_hipotetyczna(self):
         r = przelicz(
-            wspolne.wejscie(przelaczniki__tryb_kredytu="reczny", **APORT_GMINY)
+            wspolne.wejscie(przelaczniki__tryb_kredytu="reczny", **APORT)
         )
         assert r.czynsz_domykajacy_jest_hipotetyczny is True
         c = api._czynsz_poziomy(r)
@@ -330,7 +337,7 @@ class TestWplywuCzynszuNaWklad:
                 wspolne.wejscie(
                     przelaczniki__tryb_kredytu="reczny",
                     pula_spoleczna__czynsz_zakladany_m2_mies=c,
-                    **APORT_GMINY,
+                    **APORT,
                 )
             ).finansowanie.kredyt_laczny
             for c in (12.0, 22.0, 30.0)

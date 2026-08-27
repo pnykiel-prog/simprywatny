@@ -249,11 +249,14 @@ class TestWariantowGruntu:
         assert bledy == [], bledy[:10]
         assert recalc.porownaj_z_silnikiem(przeliczony, wejscie) == []
 
-    def test_aport_gminy_zgadza_sie_z_silnikiem(self, tmp_path):
+    def test_uzytkowanie_wieczyste_zgadza_sie_z_silnikiem(self, tmp_path):
+        # Po usunieciu aportu gminy (pakiet nr 2, rozdz. 11) to jedyna forma,
+        # przy ktorej grunt jest przychodem uslugi publicznej — czyli jedyna,
+        # ktora uruchamia w arkuszu galaz kanalu C.
         recalc = self._recalc()
         wejscie, plik = self._skoroszyt_wariantu(
             tmp_path,
-            grunt__forma="aport_gminy",
+            grunt__forma="uzytkowanie_wieczyste",
             grunt__liczba_lokali_dla_gminy=wspolne.USUN,
             grunt__pum_lokali_dla_gminy=wspolne.USUN,
         )

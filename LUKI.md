@@ -528,3 +528,61 @@ W trybie automatycznym `udzial_docelowy` nie wyznacza kwoty, ale nadal
 rozstrzyga, **czy kredyt w ogóle wchodzi w grę**. Zero znaczy teraz „bez
 kredytu", spójnie z resztą modelu. Test pilnuje, że każdy przyjęty kredyt jest
 obsługiwany w projekcji.
+
+
+---
+
+## 17. Zawężenie zakresu — aport działki przez gminę usunięty
+
+**Pakiet naprawczy nr 2, rozdz. 11. Rozstrzygnięcie zakresu narzędzia, nie poprawka błędu.**
+
+Kalkulator odpowiada na pytanie prywatnego inwestora. Przy aporcie działki przez
+gminę wychodziło jej 75,6% udziałów — a wraz z przekroczeniem progu
+większościowego przestaje obowiązywać kilka założeń modelu naraz: stawki czynszu
+ustala zgromadzenie wspólników (art. 28 ust. 1 ustawy z 26.10.1995), więc suwak
+czynszu przestaje być dźwignią inwestora; główna liczba wyjściowa — wymagany
+wkład inwestora — traci sens, bo przedsięwzięcie przestaje być jego; wykres
+negocjacyjny nie ma z kim negocjować. Narzędzie odpowiadało poprawnie na pytanie,
+którego nikt nie zadał.
+
+Usunięte wraz z wariantem: moduł liczenia podziału udziałów (z trzema
+uproszczeniami, które go obciążały), klasa ostrzeżeń o utracie kontroli
+korporacyjnej, próg większości z prawa spółek, pytanie o wycenę aportu na
+potrzeby objęcia udziałów.
+
+### 17.1. Czego zawężenie nie naprawia
+
+- **Reguła gruntu jako przychodu usługi publicznej zostaje.** Art. 5 ust. 9 pkt 4
+  obejmuje nieruchomość wniesioną przez jednostkę samorządu, a przy użytkowaniu
+  wieczystym ustanowionym przez gminę przyjęto ostrożnie, że to wniesienie.
+  Gałąź obliczeniowa żyje, tylko rzadziej się uruchamia.
+- **Rozjazd nazewnictwa wkładu zostaje w całości** — wynika z aportu inwestora,
+  nie gminnego.
+- **Logika i testy aportu zostają**, bo aport inwestora nadal istnieje: limit 20%
+  w ścieżce kredytowej i zakaz obciążenia hipoteką.
+
+### 17.2. Aport mniejszościowy — świadomie pomijany
+
+Gmina mogłaby objąć pakiet mniejszościowy i byłby to nadal prywatny SIM. Nie
+modelujemy: wada finansowa zostaje w całości (grunt nadal obniża dopuszczalną
+rekompensatę), korzyść jest relacyjna, a rozstrzygnięcie, czy pakiet jest
+mniejszościowy, wymagałoby modelowania struktury kapitałowej spółki.
+
+### 17.3. Usunięte, ale nie przemilczane
+
+W sekcji „działka należy do gminy" stoi zdanie wyjaśniające z alternatywą. Powód
+jest praktyczny: gmina zaproponuje aport, bo dla niej to najprostsze rozwiązanie,
+więc inwestor przy stole ma dostać gotową odpowiedź, a nie puste miejsce
+w interfejsie.
+
+### 17.4. Skutek uboczny — użytkowanie wieczyste zyskuje na wadze
+
+Zostają cztery formy działki gminnej, a jedna zyskuje. Użytkowanie wieczyste jest
+dziś liczone jako przychód usługi publicznej wyłącznie dlatego, że przy braku
+rozstrzygnięcia przyjęto wariant ostrożniejszy (kwestia 9.2). Jeżeli BGK
+potwierdzi, że nim nie jest, staje się wariantem wyraźnie najlepszym: pełne pasmo
+dotacji, brak wydatku kapitałowego, brak skutków ustrojowych, wyłącznie opłaty
+roczne w kosztach bieżących.
+
+**Po usunięciu aportu jest to jedyna forma gruntu, przy której rozstrzygnięcie
+interpretacyjne istotnie zmienia wynik** — pytanie do BGK awansuje w kolejności.

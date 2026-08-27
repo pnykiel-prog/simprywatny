@@ -4,7 +4,7 @@ from decimal import Decimal as D
 
 import pytest
 
-from sim_kalkulator import porownanie
+from sim_kalkulator import porownanie, prawo
 from sim_kalkulator.dane import FormaGruntu
 
 from . import wspolne
@@ -22,10 +22,10 @@ class TestZakresPorownania:
     def test_porownuje_wszystkie_formy_dla_pochodzenia(self):
         p = porownaj()
         formy = {w.forma for w in p.warianty}
+        # Aport gminy usuniety z zakresu — pakiet nr 2, rozdz. 11.
         assert formy == {
             "nabycie_od_gminy",
             "lokal_za_grunt",
-            "aport_gminy",
             "uzytkowanie_wieczyste",
             "dzierzawa",
         }
@@ -49,11 +49,17 @@ class TestZakresPorownania:
         assert dzierzawa.wklad_gotowkowy == D("0")
 
     def test_hipoteka_wyklucza_warianty_aportowe(self):
-        p = porownaj(grunt__obciazony_hipoteka=True)
-        aport = p.wariant("aport_gminy")
+        # Przy dzialce gminnej nie ma juz formy aportowej, wiec hipoteka bada sie
+        # na pochodzeniu inwestorskim — tam aport nadal istnieje.
+        p = porownaj(
+            grunt__pochodzenie="inwestor",
+            grunt__forma="spolka_wlascicielem",
+            grunt__obciazony_hipoteka=True,
+        )
+        aport = p.wariant("aport_inwestora")
         assert aport.policzalny is False
-        assert "hipoteka" in aport.powod
-        assert p.wariant("nabycie_od_gminy").policzalny is True
+        assert "hipotek" in aport.powod.lower()
+        assert p.wariant("spolka_wlascicielem").policzalny is True
 
 
 class TestRoznicMiedzyFormami:
@@ -62,7 +68,7 @@ class TestRoznicMiedzyFormami:
     def test_kazda_forma_daje_inny_wynik(self):
         p = porownaj()
         wklady = [w.wklad_gotowkowy for w in p.policzalne]
-        assert len(wklady) == 5
+        assert len(wklady) == 4
         # Nie wszystkie sa rowne — grunt zmienia montaz, a nie tylko opis.
         assert len(set(wklady)) > 1
 
@@ -74,12 +80,14 @@ class TestRoznicMiedzyFormami:
             if inny.forma != "dzierzawa":
                 assert dzierzawa.grant_laczny < inny.grant_laczny
 
-    def test_aport_gminy_ma_najnizsza_dopuszczalna_pomoc(self):
+    def test_uzytkowanie_wieczyste_ma_najnizsza_dopuszczalna_pomoc(self):
+        # Po zawezeniu zakresu to jedyna forma, przy ktorej grunt jest przychodem
+        # uslugi publicznej — i tylko przy odczycie domyslnym kwestii 9.2.
         p = porownaj()
-        aport = p.wariant("aport_gminy")
+        uw = p.wariant("uzytkowanie_wieczyste")
         for inny in p.policzalne:
-            if inny.forma != "aport_gminy":
-                assert aport.dopuszczalna_pomoc < inny.dopuszczalna_pomoc
+            if inny.forma != "uzytkowanie_wieczyste":
+                assert uw.dopuszczalna_pomoc < inny.dopuszczalna_pomoc
 
     def test_tylko_lokal_za_grunt_pomniejsza_powierzchnie_przychodowa(self):
         p = porownaj()
@@ -97,7 +105,6 @@ class TestRoznicMiedzyFormami:
         kolejnosc = [w.forma for w in p.wedlug_wkladu()]
         assert kolejnosc == [
             "lokal_za_grunt",
-            "aport_gminy",
             "uzytkowanie_wieczyste",
             "nabycie_od_gminy",
             "dzierzawa",
@@ -125,35 +132,23 @@ class TestWnioskuDzierzawa:
         assert "DZIERZAWA_PULAPKA_KOSZTOWA" not in kody(porownaj())
 
 
-class TestWnioskuAportGminy:
-    """Rozdz. 4.2 — aport gminy kosztuje dwa razy."""
+class TestUsunietegoWnioskuAportGminy:
+    """Wniosek 4.2 uzupelnienia nr 2 traci przedmiot wraz z wariantem."""
 
-    def test_wybor_aportu_gminy_daje_wniosek_z_kwota(self):
-        p = porownaj(grunt__forma="aport_gminy")
-        assert "APORT_GMINY_KOSZTUJE_DWA_RAZY" in kody(p)
-        wniosek = next(w for w in p.wnioski if w.kod == "APORT_GMINY_KOSZTUJE_DWA_RAZY")
-        assert wniosek.kwota > D("0")
-        assert "wspólnikiem" in wniosek.tresc
-        assert wniosek.forma_polecana == "lokal_za_grunt"
+    def test_zaden_wariant_nie_czyni_gminy_wspolnikiem(self):
+        for pochodzenie in ("inwestor", "rynek_prywatny", "gmina"):
+            p = porownanie.buduj(
+                wspolne.wejscie(
+                    grunt__pochodzenie=pochodzenie,
+                    grunt__forma=prawo.formy_dla_pochodzenia(pochodzenie)[0],
+                )
+            )
+            assert all(not w.gmina_wspolnikiem for w in p.warianty)
 
-    def test_kwota_to_rzeczywisty_spadek_dopuszczalnej_pomocy(self):
-        p = porownaj(grunt__forma="aport_gminy")
-        wniosek = next(w for w in p.wnioski if w.kod == "APORT_GMINY_KOSZTUJE_DWA_RAZY")
-        spadek = (
-            p.wariant("nabycie_od_gminy").dopuszczalna_pomoc
-            - p.wariant("aport_gminy").dopuszczalna_pomoc
-        )
-        assert wniosek.kwota == spadek
-
-    def test_bez_danych_o_lokalach_wniosek_prosi_o_nie_zamiast_polecac(self):
-        p = porownaj(
-            grunt__forma="aport_gminy",
-            grunt__liczba_lokali_dla_gminy=wspolne.USUN,
-            grunt__pum_lokali_dla_gminy=wspolne.USUN,
-        )
-        wniosek = next(w for w in p.wnioski if w.kod == "APORT_GMINY_KOSZTUJE_DWA_RAZY")
-        assert wniosek.forma_polecana == ""
-        assert "podaj liczbę i powierzchnię" in wniosek.tresc
+    def test_wniosek_o_aporcie_gminy_nie_pada(self):
+        for forma in ("nabycie_od_gminy", "lokal_za_grunt", "dzierzawa"):
+            p = porownaj(grunt__forma=forma)
+            assert "APORT_GMINY_KOSZTUJE_DWA_RAZY" not in kody(p)
 
 
 class TestWnioskuTanszaForma:

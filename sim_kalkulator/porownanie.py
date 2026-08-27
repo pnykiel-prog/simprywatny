@@ -40,7 +40,6 @@ class WariantGruntu:
     oplata_roczna: Decimal = ZERO
     domyka_sie: bool = False
     gmina_wspolnikiem: bool = False
-    udzial_gminy_w_spolce: Optional[Decimal] = None
     pasmo_45: bool = True
 
 
@@ -152,7 +151,6 @@ def buduj(w: Wejscie) -> PorownanieForm:
                 oplata_roczna=wynik.grunt.oplata_roczna,
                 domyka_sie=wynik.domyka_sie,
                 gmina_wspolnikiem=wynik.grunt.gmina_wspolnikiem,
-                udzial_gminy_w_spolce=wynik.finansowanie.udzial_gminy_w_spolce,
                 pasmo_45=wynik.granty.spoleczna.pasmo_45,
             )
         )
@@ -246,51 +244,14 @@ def _wniosek_dzierzawa(wybrana: str, indeks: Dict[str, WariantGruntu]) -> List[W
 def _wniosek_aport_gminy(
     wybrana: str, indeks: Dict[str, WariantGruntu], wyniki: Dict[str, object]
 ) -> List[Wniosek]:
-    """Rozdz. 4.2 — aport gminy kosztuje dwa razy.
+    """Wniosek 4.2 uzupelnienia nr 2 — bez przedmiotu po zawezeniu zakresu.
 
-    Obniza dopuszczalna pomoc kanalem C i wprowadza gmine do spolki. Wariant
-    "lokal za grunt" daje ta sama dzialke bez zadnego z tych skutkow, bo jest
-    nabyciem, a nie wniesieniem przez jednostke samorzadu.
+    Aport gminy zostal usuniety z listy dopuszczalnych form (pakiet nr 2,
+    rozdz. 11), wiec nie ma wariantu, do ktorego ten wniosek moglby sie odniesc.
+    Funkcja zostaje pusta zamiast zniknac, zeby zestaw wnioskow mial te sama
+    strukture, gdyby zakres kiedys wrocil.
     """
-    aport = indeks.get("aport_gminy")
-    if aport is None or not aport.wybrany or not aport.policzalny:
-        return []
-
-    # Miara skutku kanalu C: o ile spada dopuszczalna pomoc wzgledem tej samej
-    # dzialki nabytej od gminy. Nabycie nie wymaga zadnych dodatkowych danych,
-    # wiec jest zawsze policzalnym punktem odniesienia.
-    nabycie = indeks.get("nabycie_od_gminy")
-    if nabycie is None or not nabycie.policzalny:
-        return []
-    spadek = nabycie.dopuszczalna_pomoc - aport.dopuszczalna_pomoc
-    if spadek <= ZERO:
-        return []
-
-    lokal = indeks.get("lokal_za_grunt")
-    tresc = (
-        f"Grunt wniesiony przez gminę zmniejsza dopuszczalną pomoc publiczną "
-        f"o {_mln(spadek)}, a gmina staje się wspólnikiem spółki."
-    )
-    if lokal is not None and lokal.policzalny:
-        tresc += (
-            " Rozliczenie w trybie „lokal za grunt” daje tę samą działkę bez obu "
-            "tych skutków — sprawdź to porównanie."
-        )
-        polecana = "lokal_za_grunt"
-    else:
-        tresc += (
-            " Rozliczenie w trybie „lokal za grunt” daje tę samą działkę bez obu tych "
-            "skutków; żeby je przeliczyć, podaj liczbę i powierzchnię lokali dla gminy."
-        )
-        polecana = ""
-    return [
-        Wniosek(
-            kod="APORT_GMINY_KOSZTUJE_DWA_RAZY",
-            tresc=tresc,
-            forma_polecana=polecana,
-            kwota=spadek,
-        )
-    ]
+    return []
 
 
 def _wniosek_najtanszy(wybrana: str, indeks: Dict[str, WariantGruntu]) -> List[Wniosek]:
@@ -316,11 +277,7 @@ def _wniosek_najtanszy(wybrana: str, indeks: Dict[str, WariantGruntu]) -> List[W
     if not najtanszy.pasmo_45:
         tresc += " Ale ścina dotację — sprawdź, czy bilans wychodzi na plus."
     elif najtanszy.gmina_wspolnikiem:
-        tresc += (
-            f" Ale gmina obejmuje wtedy {najtanszy.udzial_gminy_w_spolce:.0%} udziałów w spółce."
-            if najtanszy.udzial_gminy_w_spolce is not None
-            else " Ale gmina obejmuje wtedy udziały w spółce."
-        )
+        tresc += " Ale gmina obejmuje wtedy udziały w spółce."
     elif najtanszy.oplata_roczna > ZERO:
         tresc += (
             f" Kosztem jest opłata roczna {_zl(najtanszy.oplata_roczna)} przez cały okres."

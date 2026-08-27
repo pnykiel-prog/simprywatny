@@ -317,14 +317,15 @@ class TestGrunt_WarstwaInterakcji:
             for o in opcje
         }
         assert wg_klucza["dzierzawa"]["skutek_krotki"]
-        assert wg_klucza["aport_gminy"]["skutek_krotki"]
         assert wg_klucza["nabycie_od_gminy"]["skutek_krotki"] == ""
+        # Aport gminy usuniety z zakresu — pakiet nr 2, rozdz. 11.
+        assert "aport_gminy" not in wg_klucza
 
     def test_hipoteka_wylacza_formy_aportowe_z_podaniem_powodu(self, adres):
         w = wolaj(adres, "/api/przelicz", {"zmiany": {"grunt.obciazony_hipoteka": True}})
         aport = next(
-            o for o in w["zakresy"]["grunt"]["poziom2"]["gmina"]
-            if o["klucz"] == "aport_gminy"
+            o for o in w["zakresy"]["grunt"]["poziom2"]["inwestor"]
+            if o["klucz"] == "aport_inwestora"
         )
         assert aport["dostepna"] is False
         assert "hipotek" in aport["powod_niedostepnosci"].lower()
@@ -345,15 +346,21 @@ class TestGrunt_WarstwaInterakcji:
         assert "utracone" not in dotacja
 
     def test_grunt_wniesiony_rzeczowo_jest_osobnym_krokiem_kaskady(self, adres):
-        w = wolaj(adres, "/api/przelicz", {"zmiany": {"grunt.forma": "aport_gminy"}})
+        w = wolaj(adres, "/api/przelicz", {"zmiany": {
+            "grunt.pochodzenie": "inwestor", "grunt.forma": "aport_inwestora"}})
         etykiety = [k["etykieta"] for k in w["wykresy"]["kaskada"]["kroki"]]
-        assert "Grunt wniesiony przez gminę" in etykiety
+        assert "Grunt, który wnosisz" in etykiety
+
+    def test_usunieta_forma_jest_wyjasniona_a_nie_przemilczana(self, adres):
+        w = wolaj(adres, "/api/przelicz", {"zmiany": {}})
+        wylaczone = w["zakresy"]["grunt"]["wylaczone"]
+        assert len(wylaczone) == 1
+        assert "lokal za grunt" in wylaczone[0]
 
     def test_porownanie_zwraca_wszystkie_formy_pochodzenia(self, adres):
         w = wolaj(adres, "/api/porownanie", {"zmiany": {}})
         assert {v["forma"] for v in w["warianty"]} == {
-            "nabycie_od_gminy", "lokal_za_grunt", "aport_gminy",
-            "uzytkowanie_wieczyste", "dzierzawa",
+            "nabycie_od_gminy", "lokal_za_grunt", "uzytkowanie_wieczyste", "dzierzawa",
         }
         assert sum(1 for v in w["warianty"] if v["wybrany"]) == 1
 
@@ -363,13 +370,13 @@ class TestGrunt_WarstwaInterakcji:
         assert "DZIERZAWA_PULAPKA_KOSZTOWA" in kody
 
     def test_wnioski_nie_niosa_numerow_artykulow(self, adres):
-        for forma in ("dzierzawa", "aport_gminy"):
+        for forma in ("dzierzawa", "lokal_za_grunt"):
             w = wolaj(adres, "/api/porownanie", {"zmiany": {"grunt.forma": forma}})
             for wn in w["wnioski"]:
                 assert not ARTYKUL.search(wn["tresc"]), wn["tresc"]
 
     def test_opisy_skutkow_nie_niosa_numerow_artykulow(self, adres):
-        for forma in ("dzierzawa", "aport_gminy", "lokal_za_grunt"):
+        for forma in ("dzierzawa", "uzytkowanie_wieczyste", "lokal_za_grunt"):
             w = wolaj(adres, "/api/przelicz", {"zmiany": {"grunt.forma": forma}})
             for opis in w["zakresy"]["grunt"]["biezace"]["opisy"]:
                 assert not ARTYKUL.search(opis), opis
@@ -381,7 +388,9 @@ class TestGrunt_WarstwaInterakcji:
         assert p.locator('.pochodzenie[aria-pressed="true"]').count() == 1
         # Poziom 2 odslania sie po wyborze poziomu 1 i pokazuje skutek przy kazdej opcji.
         opisy = p.locator("#grunt-formy .forma i").all_inner_texts()
-        assert len(opisy) == 5 and all(o.strip() for o in opisy)
+        assert len(opisy) == 4 and all(o.strip() for o in opisy)
+        # Usunieta forma stoi obok jako wyjasnienie, nie jako opcja.
+        assert p.locator("#grunt-formy .forma-wylaczona").count() == 1
 
         p.locator('.forma[data-klucz="dzierzawa"]').click()
         p.wait_for_timeout(2500)
@@ -396,7 +405,7 @@ class TestGrunt_WarstwaInterakcji:
         p.locator("#btn-porownanie").click()
         p.wait_for_selector("#karta-porownania:not([hidden])", timeout=60000)
         p.wait_for_timeout(1500)
-        assert p.locator("#porownanie-warianty .wariant").count() == 5
+        assert p.locator("#porownanie-warianty .wariant").count() == 4
         assert p.locator("#porownanie-wnioski .wniosek").count() >= 1
         assert bledy == [], bledy[:3]
 

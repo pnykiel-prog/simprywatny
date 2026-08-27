@@ -36,8 +36,10 @@ def puli(wynik, nazwa):
 class TestAsymetriaGruntu:
     """Kanal C — grunt inwestora podnosi podstawe, grunt gminy ja obniza."""
 
-    def test_aport_gminy_obniza_kn_wzgledem_aportu_inwestora(self):
-        # Dwa warianty identyczne poza forma gruntu — rozdz. 8 uzupelnienia nr 2.
+    def test_grunt_od_gminy_obniza_kn_wzgledem_gruntu_inwestora(self):
+        # Dwa warianty identyczne poza forma gruntu. Po usunieciu aportu gminy
+        # (pakiet nr 2, rozdz. 11) jedyna forma uruchamiajaca kanal C jest
+        # uzytkowanie wieczyste — i tylko przy odczycie domyslnym kwestii 9.2.
         _, inwestora = policz(
             grunt__pochodzenie="inwestor",
             grunt__forma="aport_inwestora",
@@ -45,7 +47,8 @@ class TestAsymetriaGruntu:
         )
         _, gminy = policz(
             grunt__pochodzenie="gmina",
-            grunt__forma="aport_gminy",
+            grunt__forma="uzytkowanie_wieczyste",
+            grunt__oplata_roczna=0.0,
             pula_spoleczna__kredyt__udzial_docelowy=0.0,
         )
         assert gminy.spoleczna.kn < inwestora.spoleczna.kn
@@ -66,7 +69,8 @@ class TestAsymetriaGruntu:
     def test_grunt_gminy_wchodzi_jako_przychod(self):
         _, wynik = policz(
             grunt__pochodzenie="gmina",
-            grunt__forma="aport_gminy",
+            grunt__forma="uzytkowanie_wieczyste",
+            grunt__oplata_roczna=0.0,
             pula_spoleczna__kredyt__udzial_docelowy=0.0,
         )
         rok1 = wynik.spoleczna.lata[0]
@@ -84,7 +88,8 @@ class TestAsymetriaGruntu:
         )
         _, gminy = policz(
             grunt__pochodzenie="gmina",
-            grunt__forma="aport_gminy",
+            grunt__forma="uzytkowanie_wieczyste",
+            grunt__oplata_roczna=0.0,
             pula_spoleczna__kredyt__udzial_docelowy=0.0,
         )
         grunt_puli = inwestora.spoleczna.lata[0].grunt_jako_koszt
