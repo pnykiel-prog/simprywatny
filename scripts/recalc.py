@@ -133,6 +133,17 @@ def porownaj_z_silnikiem(plik: Path, wejscie: Path) -> List[str]:
         ))
     if r.edb_kredytu > 0:
         kontrole.append(("Rekompensata", "EDB kredytu", 11, float(r.edb_kredytu)))
+    # Profil nadwyzki — arkusz liczy go wlasnymi formulami, wiec rozjazd tutaj
+    # znaczy, ze werdykt testu 3 w arkuszu opiera sie na innym rachunku niz
+    # w silniku (pakiet nr 2, rozdz. 3).
+    for pula in (r.rekompensata.spoleczna, r.rekompensata.komunalna):
+        if pula is None or not pula.profil:
+            continue
+        kontrole.append((
+            "Rekompensata", "Najgorszy rok — nadwyzka wzgledna", 11,
+            float(pula.nadwyzka_wzgledna_najgorsza),
+        ))
+        break   # arkusz ma jedna zakladke Rekompensata, etykieta jest niepowtarzalna
 
     rozjazdy = []
     for arkusz, etykieta, kolumna, oczekiwane in kontrole:

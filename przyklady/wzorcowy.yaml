@@ -123,5 +123,10 @@ przelaczniki:
   lokal_za_grunt_jest_przychodem_uoig: false
   uzytkowanie_wieczyste_jest_przychodem_uoig: true
   pasmo_liczone_od_wartosci_z_operatu: true
+  # Zbieg progow tolerancji nadwyzki (pakiet nr 2, rozdz. 2). Pula spoleczna ma
+  # dotacje I kredyt naraz, a kazdy instrument ma wlasny prog: 10% i 20%. Zaden
+  # przepis nie rozstrzyga zbiegu. ZALOZENIE — potrafi samo przewrocic werdykt.
+  #   nizszy | wyzszy | wedlug_instrumentu_dominujacego
+  prog_tolerancji_przy_dwoch_instrumentach: nizszy
   metoda_rozsadnego_zysku: kapital_zaangazowany
   remont_i_przebudowa: false

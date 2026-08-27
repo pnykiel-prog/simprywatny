@@ -9,6 +9,7 @@ from decimal import Decimal as D
 import pytest
 
 from sim_kalkulator import api, prawo, wrazliwosc
+from sim_kalkulator.dane import Waga
 from sim_kalkulator.silnik import przelicz
 
 from . import wspolne
@@ -440,3 +441,147 @@ class TestBuforaObslugiDlugu:
         # niej, lata 26-30 nie bylyby zbadane i kredyt wyszedlby za duzy.
         assert len(pokrycia) == r.wejscie.pula_spoleczna.kredyt.okres_lat
         assert pokrycia[-1] >= D("1.20")
+
+
+# Scenariusz dyskryminujacy dla zbiegu progow (pakiet nr 2, rozdz. 2). Dobrany
+# tak, zeby nadwyzka wypadla MIEDZY progiem 10% a 20% — tylko wtedy widac, ze
+# o werdykcie decyduje zalozenie, a nie liczby. Wartosc odtworzeniowa podniesiona,
+# zeby limit art. 7c dopuscil czynsz, przy ktorym nadwyzka w ogole powstaje.
+MIEDZY_PROGAMI = dict(
+    parametry_zewnetrzne__wartosc_odtworzeniowa_m2=20000.0,
+    pula_spoleczna__czynsz_zakladany_m2_mies=30.0,
+    przelaczniki__koszty_inwestycyjne_w_kn="naklad_poczatkowy",
+)
+
+
+def miedzy_progami(**dodatkowe):
+    return przelicz(wspolne.wejscie(**{**MIEDZY_PROGAMI, **dodatkowe}))
+
+
+class TestZbieguProgowTolerancji:
+    """Pakiet naprawczy nr 2, rozdz. 2 — pierwszy przypadek, w ktorym samo
+    zalozenie przesadza o odpowiedzi 'spina sie / nie spina'."""
+
+    def test_scenariusz_lezy_miedzy_progami(self):
+        p = miedzy_progami().rekompensata.spoleczna
+        assert prawo.PROG_TOLERANCJI_NADWYZKI_GRANT < p.nadwyzka_wzgledna_najgorsza
+        assert p.nadwyzka_wzgledna_najgorsza < prawo.PROG_TOLERANCJI_NADWYZKI_KREDYT
+
+    def test_obie_regule_daja_mierzalnie_rozny_wynik(self):
+        nizszy = miedzy_progami().rekompensata.spoleczna
+        wyzszy = miedzy_progami(
+            przelaczniki__prog_tolerancji_przy_dwoch_instrumentach="wyzszy"
+        ).rekompensata.spoleczna
+        assert nizszy.prog_tolerancji == D("0.10")
+        assert wyzszy.prog_tolerancji == D("0.20")
+        # Ta sama nadwyzka, dwa przeciwne werdykty. To jest cala teza rozdz. 2.
+        assert nizszy.nadwyzka_wzgledna_najgorsza == wyzszy.nadwyzka_wzgledna_najgorsza
+        assert nizszy.przechodzi is False
+        assert wyzszy.przechodzi is True
+
+    def test_werdykt_zbiorczy_odwraca_sie_razem_z_zalozeniem(self):
+        assert miedzy_progami().werdykty.rekompensata.przechodzi is False
+        assert miedzy_progami(
+            przelaczniki__prog_tolerancji_przy_dwoch_instrumentach="wyzszy"
+        ).werdykty.rekompensata.przechodzi is True
+
+    def test_ostrzezenie_nazywa_odwrocenie_i_ma_wage_werdyktu(self):
+        r = miedzy_progami()
+        o = next(
+            x for x in r.ostrzezenia
+            if x.kod == "ZALOZENIE_PROG_TOLERANCJI_DWA_INSTRUMENTY"
+        )
+        assert o.waga is Waga.ZMIENIA_WERDYKT
+        assert "ODWROTNY" in o.tresc
+        assert r.rekompensata.spoleczna.werdykt_zalezy_od_zalozenia is True
+
+    def test_gauge_niesie_zastrzezenie_przy_liczbie(self):
+        z = api.wynik_json(miedzy_progami())
+        zastrzezenie = z["wykresy"]["rekompensata_zapas"]["zastrzezenie"]
+        assert "zależy od założenia" in zastrzezenie
+        assert "10%" in zastrzezenie and "20%" in zastrzezenie
+
+    def test_pula_z_jednym_instrumentem_nie_ma_zbiegu(self):
+        p = miedzy_progami().rekompensata.komunalna
+        assert p.edb_kredytu == D("0")
+        assert p.prog_tolerancji_alternatywny is None
+        assert p.werdykt_zalezy_od_zalozenia is False
+
+    def test_regula_spoza_listy_jest_bledem_walidacji(self):
+        from sim_kalkulator.dane import BladWalidacji
+
+        with pytest.raises(BladWalidacji):
+            wspolne.wejscie(
+                przelaczniki__prog_tolerancji_przy_dwoch_instrumentach="polowa"
+            )
+
+
+class TestProfiluNadwyzki:
+    """Pakiet naprawczy nr 2, rozdz. 3 — werdykt na najgorszym okresie."""
+
+    def test_ostatni_punkt_profilu_rowna_sie_miarze_calookresowej(self):
+        # Profil jest zaostrzeniem, nie inna miara. Gdyby ostatni punkt sie
+        # rozjezdzal, obie liczby opisywalyby rozne rzeczy.
+        for pula in miedzy_progami().rekompensata.badane:
+            if not pula.profil:
+                continue
+            ostatni = pula.profil[-1]
+            assert ostatni.ruoig_narastajaco == pytest.approx(pula.ruoig)
+            assert ostatni.dopuszczalna_narastajaco == pytest.approx(pula.dopuszczalna)
+            assert ostatni.nadwyzka_wzgledna == pytest.approx(pula.nadwyzka_wzgledna)
+
+    def test_profil_nigdy_nie_jest_lagodniejszy_od_sredniej(self):
+        # Ostatni punkt profilu rowna sie miary calookresowej, wiec maksimum po
+        # profilu nie moze byc od niej mniejsze — poza szumem ostatniej cyfry.
+        from sim_kalkulator.rekompensata import ISTOTNA_ROZNICA_PROFILU
+
+        for pula in przelicz(wspolne.wejscie()).rekompensata.badane:
+            assert (
+                pula.nadwyzka_wzgledna_najgorsza
+                >= pula.nadwyzka_wzgledna - ISTOTNA_ROZNICA_PROFILU
+            )
+
+    def test_profil_ma_tyle_lat_ile_okres_powierzenia(self):
+        for pula in przelicz(wspolne.wejscie()).rekompensata.badane:
+            assert len(pula.profil) == pula.okres_powierzenia_lat
+            assert [o.rok for o in pula.profil] == list(
+                range(1, pula.okres_powierzenia_lat + 1)
+            )
+
+    def test_nierowny_rozklad_daje_ostrzezenie_i_wskazuje_rok(self):
+        r = przelicz(wspolne.wejscie())
+        chwiejne = [p for p in r.rekompensata.badane if p.profil_zaostrza_werdykt]
+        assert chwiejne, "scenariusz wzorcowy ma nierowny rozklad w puli komunalnej"
+        kody_o = {o.kod for o in r.ostrzezenia}
+        assert "NADWYZKA_ROZLOZONA_NIEROWNO" in kody_o
+        for pula in chwiejne:
+            assert pula.okres_najgorszy.rok >= 1
+
+    def test_naklad_poczatkowy_przesuwa_najgorszy_rok_na_koniec(self):
+        # Naklad w roku 1 daje ogromna kwote dopuszczalna na starcie, wiec
+        # nadwyzka narasta dopiero, gdy przychody czynszowe zaczna ja zjadac.
+        p = miedzy_progami().rekompensata.spoleczna
+        assert p.okres_najgorszy.rok == p.okres_powierzenia_lat
+
+    def test_amortyzacja_przesuwa_najgorszy_rok_na_poczatek(self):
+        # Przy rozlozeniu nakladu kwota dopuszczalna w roku 1 jest niewielka,
+        # a cala dotacja juz splynela — najciasniej jest od razu.
+        p = przelicz(wspolne.wejscie()).rekompensata.komunalna
+        assert p.okres_najgorszy.rok == 1
+
+    def test_rozklad_edb_kredytu_sumuje_sie_do_calosci(self):
+        p = przelicz(wspolne.wejscie()).rekompensata.spoleczna
+        assert sum(p.edb_kredytu_lata) == p.edb_kredytu
+        assert len(p.edb_kredytu_lata) == 30
+
+    def test_rozklad_rozsadnego_zysku_sumuje_sie_do_calosci(self):
+        for pula in przelicz(wspolne.wejscie()).rekompensata.badane:
+            assert sum(pula.rz_lata) == pytest.approx(pula.rz)
+
+    def test_api_podaje_profil_i_rok_najgorszy(self):
+        z = api.wynik_json(miedzy_progami())
+        spoleczna = next(p for p in z["rekompensata"] if p["nazwa"] == "spoleczna")
+        assert len(spoleczna["profil"]) == 30
+        assert spoleczna["rok_najgorszy"] == 30
+        assert spoleczna["werdykt_zalezy_od_zalozenia"] is True
+        assert spoleczna["prog_tolerancji_alternatywny"] == pytest.approx(0.20)

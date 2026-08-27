@@ -385,9 +385,38 @@ class TestDwaTestyCzyJeden:
         assert {p.sciezka for p in wynik.badane} == {"grant", "kredyt"}
 
     def test_progi_tolerancji_roznia_sie_miedzy_pulami(self):
+        # Pakiet nr 2, rozdz. 2: pula spoleczna ma dotacje I kredyt, wiec sam
+        # odczyt "sciezka kredytowa -> 20%" nie wystarcza. Przy regule domyslnej
+        # (nizszy) wiaze 10%, ale drugi odczyt (20%) wraca razem z wynikiem.
         _, wynik = policz()
-        assert wynik.spoleczna.prog_tolerancji == D("0.20")   # sciezka kredytowa
-        assert wynik.komunalna.prog_tolerancji == D("0.10")   # sciezka grantowa
+        assert wynik.spoleczna.prog_tolerancji == D("0.10")
+        assert wynik.spoleczna.prog_tolerancji_alternatywny == D("0.20")
+        # Komunalna ma sam grant — zbiegu nie ma i odczyt jest jednoznaczny.
+        assert wynik.komunalna.prog_tolerancji == D("0.10")
+        assert wynik.komunalna.prog_tolerancji_alternatywny is None
+
+    def test_regula_wyzszy_przywraca_prog_kredytowy(self):
+        dane = wspolne.zmien()
+        dane["przelaczniki"]["prog_tolerancji_przy_dwoch_instrumentach"] = "wyzszy"
+        _, wynik = policz(dane)
+        assert wynik.spoleczna.prog_tolerancji == D("0.20")
+        assert wynik.spoleczna.prog_tolerancji_alternatywny == D("0.10")
+
+    def test_regula_dominujacego_idzie_za_wieksza_pomoca(self):
+        dane = wspolne.zmien()
+        dane["przelaczniki"]["prog_tolerancji_przy_dwoch_instrumentach"] = (
+            "wedlug_instrumentu_dominujacego"
+        )
+        _, wynik = policz(dane)
+        p = wynik.spoleczna
+        oczekiwany = D("0.20") if p.edb_kredytu >= p.edb_grantu else D("0.10")
+        assert p.prog_tolerancji == oczekiwany
+
+    def test_zbieg_progow_zawsze_daje_ostrzezenie(self):
+        _, wynik = policz()
+        assert "ZALOZENIE_PROG_TOLERANCJI_DWA_INSTRUMENTY" in {
+            o.kod for o in wynik.ostrzezenia
+        }
 
     def test_przelacznik_scala_w_jeden_test(self):
         dane = wspolne.zmien()
@@ -398,12 +427,33 @@ class TestDwaTestyCzyJeden:
         assert wynik.laczna.kn == wynik.spoleczna.kn + wynik.komunalna.kn
         assert "REKOMPENSATA_JEDEN_TEST" in {o.kod for o in wynik.ostrzezenia}
 
-    def test_scalona_pula_bierze_luzniejszy_prog_kredytowy(self):
+    def test_scalona_pula_tez_podlega_zbiegowi_progow(self):
+        # Scalone przedsiewziecie ma dotacje i kredyt tak samo jak pula spoleczna,
+        # wiec i tu rozstrzyga regula, a nie sama sciezka.
         dane = wspolne.zmien()
         dane["przelaczniki"]["hybryda_jako_jedno_przedsiewziecie"] = True
         _, wynik = policz(dane)
         assert wynik.laczna.sciezka == "kredyt"
-        assert wynik.laczna.prog_tolerancji == D("0.20")
+        assert wynik.laczna.prog_tolerancji == D("0.10")
+        assert wynik.laczna.prog_tolerancji_alternatywny == D("0.20")
+
+    def test_ostrzezenia_dotycza_rachunku_ktory_daje_werdykt(self):
+        # Po scaleniu ostrzezenia o progu i o profilu maja opisywac pule laczna,
+        # a nie skladowe, ktorych werdykt nie uzywa.
+        dane = wspolne.zmien()
+        dane["przelaczniki"]["hybryda_jako_jedno_przedsiewziecie"] = True
+        _, wynik = policz(dane)
+        opisy = [
+            o.tresc for o in wynik.ostrzezenia
+            if o.kod in (
+                "ZALOZENIE_PROG_TOLERANCJI_DWA_INSTRUMENTY",
+                "ZALOZENIE_OKRES_ROZLICZENIOWY_NADWYZKI",
+                "NADWYZKA_ROZLOZONA_NIEROWNO",
+            )
+        ]
+        assert opisy
+        for opis in opisy:
+            assert "puli laczna" in opis or "Pula laczna" in opis
 
     def test_ujemne_kn_daje_ostrzezenie(self):
         _, wynik = policz()

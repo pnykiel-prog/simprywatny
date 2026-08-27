@@ -240,6 +240,62 @@ def edb_kredyt(
     return edb
 
 
+def edb_kredyt_lata(
+    kwota: Decimal,
+    oprocentowanie_preferencyjne: Decimal,
+    okres_lat: int,
+    karencja_lat: int,
+    stopa_referencyjna: Decimal,
+    stopa_dyskontowa: Decimal,
+) -> Tuple[Decimal, ...]:
+    """Rozklad EDB kredytu na lata — te same skladniki, tylko nie zsumowane.
+
+    Wzor z § 4 pkt 5 lit. e jest suma po okresach, wiec rozklad nie wymaga
+    zadnego dodatkowego zalozenia: skladnik i-ty jest korzysca roku i-tego,
+    zdyskontowana na dzien przyznania. Potrzebne do profilu nadwyzki
+    rekompensaty (pakiet nr 2, rozdz. 3) — rekompensata nie splywa jednorazowo,
+    tylko narasta w miare splaty kredytu.
+
+    Suma zwroconej krotki jest rowna `edb_kredyt` co do grosza; strzeze tego test.
+    """
+    S = zl(kwota)
+    if S <= ZERO:
+        return ()
+    # Walidacja i asercje siedza w `edb_kredyt` — wolamy ja, zeby rozklad nigdy
+    # nie przeszedl tam, gdzie suma zostalaby odrzucona.
+    edb_kredyt(
+        kwota, oprocentowanie_preferencyjne, okres_lat, karencja_lat,
+        stopa_referencyjna, stopa_dyskontowa,
+    )
+    rp = zl(oprocentowanie_preferencyjne)
+    r = zl(stopa_referencyjna)
+    rd = zl(stopa_dyskontowa)
+    N = int(okres_lat)
+    T = int(karencja_lat)
+    okresy_splaty = N - T
+    roznica_rat = _annuita(S, r, okresy_splaty) - _annuita(S, rp, okresy_splaty)
+
+    lata: List[Decimal] = []
+    for i in range(1, N + 1):
+        licznik = (S * r - S * rp) if i <= T else roznica_rat
+        lata.append(licznik / (JEDEN + rd) ** i)
+    return tuple(lata)
+
+
+def edb_dla_harmonogramu_lata(h: Harmonogram, p: ParametryZewnetrzne) -> Tuple[Decimal, ...]:
+    """Rozklad EDB na lata dla zbudowanego harmonogramu."""
+    if not h.aktywny:
+        return ()
+    return edb_kredyt_lata(
+        kwota=h.kwota,
+        oprocentowanie_preferencyjne=h.oprocentowanie,
+        okres_lat=h.okres_lat,
+        karencja_lat=h.karencja_lat,
+        stopa_referencyjna=p.stopa_referencyjna_ke,
+        stopa_dyskontowa=p.stopa_dyskontowa,
+    )
+
+
 def edb_dla_harmonogramu(h: Harmonogram, p: ParametryZewnetrzne) -> Decimal:
     """EDB dla zbudowanego harmonogramu, przy parametrach zewnetrznych wejscia."""
     if not h.aktywny:

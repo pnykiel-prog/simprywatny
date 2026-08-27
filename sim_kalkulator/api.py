@@ -154,9 +154,28 @@ def wynik_json(r: Wynik) -> Dict[str, Any]:
             "nadwyzka": _liczba(p.nadwyzka),
             "nadwyzka_wzgledna": _liczba(p.nadwyzka_wzgledna),
             "prog_tolerancji": _liczba(p.prog_tolerancji),
+            "prog_tolerancji_uzasadnienie": p.prog_tolerancji_uzasadnienie,
+            "prog_tolerancji_alternatywny": _liczba(p.prog_tolerancji_alternatywny),
+            "przechodzi_przy_alternatywnym_progu": p.przechodzi_przy_alternatywnym_progu,
+            "werdykt_zalezy_od_zalozenia": p.werdykt_zalezy_od_zalozenia,
             "kwota_do_zwrotu": _liczba(p.kwota_do_zwrotu),
             "przechodzi": p.przechodzi,
             "grunt_ujecie": p.grunt_ujecie,
+            "nadwyzka_wzgledna_najgorsza": _liczba(p.nadwyzka_wzgledna_najgorsza),
+            "rok_najgorszy": (
+                p.okres_najgorszy.rok if p.okres_najgorszy is not None else None
+            ),
+            "profil_zaostrza_werdykt": p.profil_zaostrza_werdykt,
+            "profil": [
+                {
+                    "rok": o.rok,
+                    "ruoig": _liczba(o.ruoig_narastajaco),
+                    "dopuszczalna": _liczba(o.dopuszczalna_narastajaco),
+                    "nadwyzka": _liczba(o.nadwyzka),
+                    "nadwyzka_wzgledna": _liczba(o.nadwyzka_wzgledna),
+                }
+                for o in p.profil
+            ],
         }
         for p in r.rekompensata.badane
     ]
@@ -586,6 +605,7 @@ def _zapas_rekompensaty(r: Wynik) -> Dict[str, Any]:
         "wykorzystanie": _liczba(wykorzystanie),
         "przekroczenie": _liczba(przekroczenie),
         "zapas": _liczba(zapas),
+        "zastrzezenie": _zastrzezenie_do_rekompensaty(r),
         "etykieta": (
             f"Przekroczenie limitu o {przekroczenie:.0%}"
             if przekroczenie > ZERO
@@ -597,6 +617,26 @@ def _zapas_rekompensaty(r: Wynik) -> Dict[str, Any]:
         "do_zwrotu": _liczba(r.rekompensata.kwota_do_zwrotu),
         "zdanie": zdanie,
     }
+
+
+def _zastrzezenie_do_rekompensaty(r: Wynik) -> str:
+    """Zdanie o tym, ze werdykt testu 3 wisi na zalozeniu, a nie na danych.
+
+    Pakiet nr 2, rozdz. 2: pierwszy przypadek, w ktorym samo zalozenie przesadza
+    o odpowiedzi "spina sie / nie spina". Uzytkownik ma to zobaczyc przy liczbie,
+    a nie dopiero w liscie ostrzezen — inaczej wynik wyglada na rozstrzygniety.
+    """
+    chwiejne = [p for p in r.rekompensata.badane if p.werdykt_zalezy_od_zalozenia]
+    if not chwiejne:
+        return ""
+    pula = chwiejne[0]
+    kierunek = "przeszedłby" if not pula.przechodzi else "nie przeszedłby"
+    return (
+        f"Wynik zależy od założenia: przyjęto limit nadwyżki "
+        f"{pula.prog_tolerancji:.0%}, a przy drugim dopuszczalnym odczycie "
+        f"({pula.prog_tolerancji_alternatywny:.0%}) test {kierunek}. Przepisy zbiegu "
+        "nie rozstrzygają — to pytanie do BGK, nie do kalkulatora."
+    )
 
 
 def _przeplywy(r: Wynik) -> Dict[str, Any]:

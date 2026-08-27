@@ -386,6 +386,77 @@ class TestZmianaZalozenia:
         ) < 0.01
 
 
+@pytest.fixture(scope="module")
+def skoroszyt_miedzy_progami(tmp_path_factory):
+    from tests.test_audyt import MIEDZY_PROGAMI
+
+    w = wspolne.wejscie(**MIEDZY_PROGAMI)
+    sciezka = tmp_path_factory.mktemp("prog") / "wynik.xlsx"
+    arkusz.eksportuj(przelicz(w), sciezka, wrazliwosc.build(w, krok=D("0.5")))
+    return sciezka
+
+
+class TestProguTolerancjiWArkuszu:
+    """Pakiet nr 2, rozdz. 2+3 — prog jest komorka, a werdykt idzie za profilem."""
+
+    def _recalc(self):
+        import importlib.util
+
+        korzen = Path(__file__).resolve().parent.parent
+        spec = importlib.util.spec_from_file_location(
+            "recalc", korzen / "scripts" / "recalc.py"
+        )
+        recalc = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(recalc)
+        return recalc
+
+    def test_arkusz_zgadza_sie_z_silnikiem_przy_progu_nizszym(
+        self, skoroszyt_miedzy_progami
+    ):
+        from tests.test_audyt import MIEDZY_PROGAMI
+
+        recalc = self._recalc()
+        po = openpyxl.load_workbook(
+            recalc.przelicz(skoroszyt_miedzy_progami), data_only=True
+        )
+        r = przelicz(wspolne.wejscie(**MIEDZY_PROGAMI))
+        assert komorka(po["Werdykty"], "WERDYKT 3").value == "nie przechodzi"
+        assert r.werdykty.rekompensata.przechodzi is False
+        najgorsza = komorka(
+            po["Rekompensata"], "Najgorszy rok — nadwyzka wzgledna", 11
+        ).value
+        assert abs(
+            najgorsza - float(r.rekompensata.spoleczna.nadwyzka_wzgledna_najgorsza)
+        ) < 0.0001
+
+    def test_podmiana_progu_w_arkuszu_odwraca_werdykt(
+        self, skoroszyt_miedzy_progami, tmp_path
+    ):
+        # Prog jest ZALOZENIEM, wiec ma byc komorka do podmiany, a nie stala
+        # wpisana w formule. Test sprawdza obie rzeczy naraz: ze da sie ja
+        # podmienic i ze arkusz faktycznie przelicza od niej werdykt.
+        from tests.test_audyt import MIEDZY_PROGAMI
+
+        recalc = self._recalc()
+        wb = openpyxl.load_workbook(skoroszyt_miedzy_progami)
+        cel = komorka(wb["Rekompensata"], "Prog tolerancji nadwyzki — udzial", 11)
+        assert cel.value == 0.10
+        cel.value = 0.20
+        zmieniony = tmp_path / "prog_wyzszy.xlsx"
+        wb.save(zmieniony)
+
+        po = openpyxl.load_workbook(recalc.przelicz(zmieniony), data_only=True)
+        assert komorka(po["Werdykty"], "WERDYKT 3").value == "przechodzi"
+        # ...i silnik przy tym samym zalozeniu mowi to samo.
+        r = przelicz(
+            wspolne.wejscie(
+                **MIEDZY_PROGAMI,
+                przelaczniki__prog_tolerancji_przy_dwoch_instrumentach="wyzszy",
+            )
+        )
+        assert r.werdykty.rekompensata.przechodzi is True
+
+
 def _wiersz(ws, etykieta):
     for wiersz in ws.iter_rows(min_col=1, max_col=1):
         if wiersz[0].value == etykieta:

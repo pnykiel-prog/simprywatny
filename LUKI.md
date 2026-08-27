@@ -668,3 +668,127 @@ spada z 5 968 765 zł na 5 485 629 zł.
 > finansowaniu zwrotnym w programie SBC? Czy wskaźnik liczony jest od nadwyżki
 > operacyjnej do raty, czy inaczej, i na którym roku projekcji — pierwszym pełnym,
 > średniej, czy najgorszym?
+
+---
+
+## 19. Zbieg progów tolerancji — dotacja i kredyt w jednej puli
+
+**Status: założenie, wartość domyślna `nizszy` (10%). Do potwierdzenia w BGK.
+Pierwszy przypadek, w którym samo założenie przesądza o werdykcie.**
+
+### 19.1. Na czym polega zbieg
+
+Próg tolerancji nadwyżki rekompensaty przypisany był ścieżce: 10% dla puli
+grantowej (§ 7 ust. 9 rozp. 1897), 20% dla kredytowej (§ 13 ust. 8 rozp. 766).
+Przypisanie jest zrozumiałe, ale niepełne — **pula społeczna ma oba instrumenty
+naraz**: dotację do 45% kosztów i kredyt SBC.
+
+Dotacja podlega rozporządzeniu o wsparciu finansowym, kredyt rozporządzeniu
+o finansowaniu zwrotnym. Żaden z dwóch przepisów nie mówi, co dzieje się, gdy
+to samo przedsięwzięcie korzysta z obu. Jeżeli oba obowiązują równolegle, wiąże
+niższy.
+
+### 19.2. Co przyjęto
+
+`przelaczniki.prog_tolerancji_przy_dwoch_instrumentach`, trzy wartości:
+
+| wartość | próg | uzasadnienie |
+|---|---|---|
+| `nizszy` (domyślna) | 10% | oba rozporządzenia obowiązują równolegle, wiąże niższy |
+| `wyzszy` | 20% | przedsięwzięcie z finansowaniem zwrotnym podlega reżimowi rozp. 766 w całości |
+| `wedlug_instrumentu_dominujacego` | 10% albo 20% | rozstrzyga ten instrument, który niesie większe EDB |
+
+Domyślnie `nizszy`, jako ostrożniejszy. Pula z jednym instrumentem zbiegowi nie
+podlega i odczyt pozostaje jednoznaczny — dotyczy to całej puli komunalnej,
+w której kredyt SBC jest niedopuszczalny (art. 5a ust. 3).
+
+### 19.3. To założenie odwraca werdykt
+
+Dotąd żadne założenie nie decydowało samo o odpowiedzi „spina się / nie spina" —
+przesuwały kwoty, nie werdykty. To decyduje. Scenariusz testowy
+(`tests/test_audyt.py`, `MIEDZY_PROGAMI`) daje nadwyżkę **19,21%**:
+
+| założenie | próg | test 3 |
+|---|---|---|
+| `nizszy` | 10% | **nie przechodzi** |
+| `wyzszy` | 20% | **przechodzi** |
+
+Te same dane, ten sam rachunek, przeciwne odpowiedzi. Dlatego wynik niesie to
+jawnie w trzech miejscach naraz: ostrzeżenie `ZALOZENIE_PROG_TOLERANCJI_DWA_INSTRUMENTY`
+o wadze „zmienia werdykt", zdanie przy liczbie w kafelku testu 3 (nie dopiero
+w liście uwag), oraz żółta komórka progu w zakładce `Rekompensata` arkusza,
+którą można podmienić i przeliczyć.
+
+### 19.4. Pytanie do BGK
+
+> Przedsięwzięcie korzysta jednocześnie z finansowego wsparcia z Funduszu Dopłat
+> i z finansowania zwrotnego. Który próg tolerancji nadwyżki rekompensaty ma
+> zastosowanie — 10% z § 7 ust. 9 rozp. 1897, 20% z § 13 ust. 8 rozp. 766, czy
+> każdy do części pomocy pochodzącej z danego instrumentu?
+
+---
+
+## 20. Rozkład nadwyżki rekompensaty w czasie
+
+**Status: naprawa. Werdykt liczony na najgorszym okresie, nie na średniej.**
+
+### 20.1. Co było nie tak
+
+Nadwyżka była annualizowana przez podzielenie przez liczbę lat okresu
+powierzenia. To zakłada rozkład równomierny, a rzeczywisty taki nie jest:
+dotacja spływa jednorazowo na etapie inwestycji, nakład wchodzi według wybranego
+ujęcia, a przychody czynszowe rozkładają się przez cały okres. Nadwyżka
+przesuwa się więc ku jednemu albo drugiemu końcowi okresu, zależnie od ujęcia
+nakładu.
+
+Przy wyniku granicznym średnia pokazuje zapas, którego w najciaśniejszym roku
+rozliczenia nie ma.
+
+### 20.2. Co przyjęto
+
+Profil narastający rok po rok: rekompensata otrzymana do roku *t* wobec kwoty
+dopuszczalnej należnej do roku *t*. Werdykt bierze rok najgorszy.
+
+Nadkompensata jest pytaniem o to, ile pomocy podmiot **już** dostał wobec tego,
+ile mu się **już** należało — dlatego obie strony są narastające, a nie roczne.
+Pojedynczy rok nic o stanie rozliczenia nie mówi.
+
+Żadna pozycja nie jest rozdzielana założeniem, którego model wcześniej nie miał:
+
+- **EDB kredytu** — wzór § 4 pkt 5 lit. e jest sumą po okresach, więc składnik
+  *i*-ty jest korzyścią roku *i*-tego. Rozkład jest odczytem, nie szacunkiem;
+  jego suma równa się całości co do grosza (`kredyt.edb_kredyt_lata`).
+- **Koszty netto** — liczone rok po roku od początku, bez zmian.
+- **Rozsądny zysk** przy metodzie kapitałowej — ze wzoru.
+- **EDB grantu i wsparcie dodatkowe** — rok 1: dotacja jest wypłacana na etapie
+  inwestycji, nie rozkładana na okres powierzenia.
+
+Jeden wyjątek: **rozsądny zysk podany kwotą wprost** nie ma własnego profilu
+czasowego, więc rozkład równy jest tam dodatkowym założeniem. Zaznaczone
+w `rozsadny_zysk_lata`.
+
+Ostatni punkt profilu jest z definicji równy wielkości całookresowej, więc nowa
+miara nigdy nie jest łagodniejsza od poprzedniej — może być tylko ostrzejsza.
+
+### 20.3. Ile to zmienia
+
+W scenariuszu wzorcowym pula komunalna: średnia **74,7%**, najgorszy rok (rok 1)
+**86,8%**. Kierunek zależy od ujęcia nakładu:
+
+| ujęcie nakładu w KN | gdzie wypada najgorszy rok | dlaczego |
+|---|---|---|
+| `amortyzacja` | rok 1 | kwota dopuszczalna narasta powoli, a dotacja spłynęła w całości |
+| `naklad_poczatkowy` | ostatni rok | ogromna kwota dopuszczalna na starcie, którą przychody czynszowe zjadają przez cały okres |
+
+Gdy najgorszy rok odbiega od średniej o więcej niż 0,05 punktu procentowego,
+wynik niesie ostrzeżenie `NADWYZKA_ROZLOZONA_NIEROWNO` o wadze „zmienia werdykt",
+z podaniem roku i obu liczb.
+
+### 20.4. Czego to nie rozwiązuje
+
+Przepis odnosi próg do **okresu rozliczeniowego**, a model nadal nie zna jego
+długości — nie ma jej w żadnym dokumencie wejściowym. Profil roczny jest
+najbliższym przybliżeniem, jakie da się zbudować bez tej danej: gdyby okres
+rozliczeniowy był dwuletni albo pięcioletni, punkty pomiaru byłyby rzadsze,
+a wynik nieco łagodniejszy. Ostrzeżenie `ZALOZENIE_OKRES_ROZLICZENIOWY_NADWYZKI`
+zostaje.

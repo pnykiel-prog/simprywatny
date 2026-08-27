@@ -175,6 +175,9 @@ button.akcja:disabled{opacity:.55;cursor:progress}
 .zastrzezenia{font-size:11.5px;color:var(--tekst-2);line-height:1.55}
 .zastrzezenia li{margin-bottom:5px}
 .info{font-size:11.5px;color:var(--tekst-3)}
+.pole .zastrzezenie{margin-top:6px;font-size:11px;line-height:1.35;
+  color:var(--tekst-2);border-top:1px dashed var(--linia-mocna);padding-top:5px}
+.pole.chwiejny{border-style:dashed}
 .znacznik-zalozenia{font-size:10px;text-transform:uppercase;letter-spacing:.04em;
   padding:1px 5px;border-radius:3px;background:var(--ostrzezenie-tlo,#fdf3d8);
   color:var(--ostrzezenie-tekst,#7a5c12);vertical-align:middle}
@@ -896,14 +899,18 @@ function rysujWerdykty(w){
   opisy[3] = {
     liczba: proc(zapas.liczba_glowna),
     opis: zapas.przechodzi ? "zapasu do limitu pomocy" : "ponad limit pomocy publicznej",
+    // Werdykt testu 3 potrafi wisiec na zalozeniu o zbiegu progow, a nie na
+    // liczbach. Zdanie przychodzi gotowe z serwera — tutaj tylko sie je pokazuje.
+    zastrzezenie: zapas.zastrzezenie || "",
   };
 
   $("#werdykty").innerHTML = w.werdykty.map((t) => {
     const o = opisy[t.numer];
-    return `<div class="pole ${t.przechodzi ? "tak" : "nie"}">
+    return `<div class="pole ${t.przechodzi ? "tak" : "nie"}${o.zastrzezenie ? " chwiejny" : ""}">
       <div class="nazwa"><span class="ikona">${t.przechodzi ? "✓" : "✗"}</span>${t.nazwa}</div>
       <div class="liczba">${o.liczba ?? "—"}</div>
       <div class="opis">${o.opis}</div>
+      ${o.zastrzezenie ? `<div class="zastrzezenie">${o.zastrzezenie}</div>` : ""}
     </div>`;
   }).join("");
 

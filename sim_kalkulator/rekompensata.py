@@ -40,11 +40,15 @@ from .dane import (
     Wejscie,
 )
 from .grunt import rozstrzygnij
-from .kredyt import Harmonogram, edb_grant
+from .kredyt import Harmonogram, edb_dla_harmonogramu_lata, edb_grant
 from .projekcja import FinansowaniePuli, ProjekcjaPuli
 from .waluta import ZERO, bezpieczny_iloraz
 
 JEDEN = Decimal(1)
+
+# Ponizej tej roznicy nierownomiernosc profilu nie jest ustaleniem, tylko szumem
+# ostatniej cyfry — patrz `RekompensataPuli.profil_zaostrza_werdykt`.
+ISTOTNA_ROZNICA_PROFILU = Decimal("0.0005")
 
 
 @dataclass(frozen=True)
@@ -81,6 +85,36 @@ class RokUOIG:
 
 
 @dataclass(frozen=True)
+class OkresNadwyzki:
+    """Stan rozliczenia nadwyzki na koniec roku `rok` — narastajaco od poczatku.
+
+    Nadkompensata jest pytaniem o to, ile pomocy podmiot JUZ dostal wobec tego,
+    ile mu sie JUZ nalezalo. Dlatego obie strony sa narastajace, a nie roczne:
+    dotacja splywa na poczatku, koszty netto tez sa skoncentrowane na poczatku,
+    a przychody czynszowe rozkladaja sie przez caly okres — pojedynczy rok nie
+    mowi nic o stanie rozliczenia.
+    """
+
+    rok: int
+    ruoig_narastajaco: Decimal
+    dopuszczalna_narastajaco: Decimal
+
+    @property
+    def nadwyzka(self) -> Decimal:
+        return max(ZERO, self.ruoig_narastajaco - self.dopuszczalna_narastajaco)
+
+    @property
+    def nadwyzka_wzgledna(self) -> Decimal:
+        """Nadwyzka odniesiona do rekompensaty otrzymanej do tego roku.
+
+        Ta sama miara co dla calego okresu — nadwyzka do rekompensaty — wiec
+        porownuje sie wprost z progiem tolerancji. W ostatnim roku wartosc jest
+        rowna wielkosci calookresowej co do grosza; strzeze tego test.
+        """
+        return bezpieczny_iloraz(self.nadwyzka, self.ruoig_narastajaco)
+
+
+@dataclass(frozen=True)
 class RekompensataPuli:
     nazwa: str
     sciezka: str                       # "grant" albo "kredyt"
@@ -93,6 +127,13 @@ class RekompensataPuli:
     wsparcie_dodatkowe: Decimal        # RFRM + dokumentacja BGK, § 7 ust. 7 rozp. 1897
     prog_tolerancji: Decimal
     grunt_ujecie: str                  # opis zastosowanej reguly gruntowej
+    # Rozklady roczne — potrzebne do profilu nadwyzki (pakiet nr 2, rozdz. 3).
+    edb_kredytu_lata: Tuple[Decimal, ...] = ()
+    rz_lata: Tuple[Decimal, ...] = ()
+    # Zbieg progow (pakiet nr 2, rozdz. 2). `prog_tolerancji_alternatywny` jest
+    # ustawiony TYLKO wtedy, gdy pula ma oba instrumenty i istnieje drugi odczyt.
+    prog_tolerancji_uzasadnienie: str = ""
+    prog_tolerancji_alternatywny: Optional[Decimal] = None
 
     @property
     def ruoig(self) -> Decimal:
@@ -142,9 +183,117 @@ class RekompensataPuli:
         """
         return bezpieczny_iloraz(self.nadwyzka_roczna, self.srednia_roczna_rekompensata)
 
+    # ------------------------------------------------------------------
+    # Profil nadwyzki w czasie — pakiet naprawczy nr 2, rozdz. 3
+    # ------------------------------------------------------------------
+
+    @property
+    def profil(self) -> Tuple[OkresNadwyzki, ...]:
+        """Stan rozliczenia nadwyzki na koniec kazdego roku okresu powierzenia.
+
+        Annualizacja przez podzielenie nadwyzki przez liczbe lat zakladala
+        rozklad rowny. Rzeczywisty przebieg taki nie jest: dotacja splywa
+        jednorazowo na poczatku, naklad inwestycyjny wchodzi wedlug wybranego
+        ujecia, a przychody czynszowe rozkladaja sie przez caly okres — wiec
+        nadwyzka przesuwa sie ku latom pozniejszym albo wczesniejszym zaleznie
+        od ujecia nakladu.
+
+        Zadna pozycja nie jest tu rozdzielana zalozeniem, ktorego model wczesniej
+        nie mial. EDB kredytu ma rozklad wprost ze wzoru (§ 4 pkt 5 lit. e jest
+        suma po okresach), koszty netto sa liczone rok po roku od poczatku,
+        rozsadny zysk przy metodzie kapitalowej rowniez. Jedyny wyjatek to RZ
+        podany kwota wprost — patrz `rozsadny_zysk_lata`.
+
+        EDB grantu i wsparcie dodatkowe przypisane sa do roku 1: dotacja jest
+        wyplacana na etapie inwestycji, a nie rozkladana na okres powierzenia.
+        """
+        lat = self.okres_powierzenia_lat
+        if lat <= 0 or not self.lata:
+            # Bez rozkladu rocznego profilu nie da sie zbudowac. Zwracamy pustke,
+            # a werdykt spada z powrotem na miare calookresowa — zamiast na
+            # rachunek, w ktorym cala rekompensata stoi naprzeciw zera kosztow.
+            return ()
+        okresy: List[OkresNadwyzki] = []
+        ruoig_nar = ZERO
+        dopuszczalna_nar = ZERO
+        for i in range(1, lat + 1):
+            if i == 1:
+                ruoig_nar += self.edb_grantu + self.wsparcie_dodatkowe
+            if i <= len(self.edb_kredytu_lata):
+                ruoig_nar += self.edb_kredytu_lata[i - 1]
+            if i <= len(self.lata):
+                dopuszczalna_nar += self.lata[i - 1].netto_zdyskontowane
+            if i <= len(self.rz_lata):
+                dopuszczalna_nar += self.rz_lata[i - 1]
+            okresy.append(
+                OkresNadwyzki(
+                    rok=i,
+                    ruoig_narastajaco=ruoig_nar,
+                    dopuszczalna_narastajaco=dopuszczalna_nar,
+                )
+            )
+        return tuple(okresy)
+
+    @property
+    def okres_najgorszy(self) -> Optional[OkresNadwyzki]:
+        """Rok o najwyzszej nadwyzce wzglednej. To on rozstrzyga werdykt."""
+        profil = self.profil
+        if not profil:
+            return None
+        return max(profil, key=lambda o: o.nadwyzka_wzgledna)
+
+    @property
+    def nadwyzka_wzgledna_najgorsza(self) -> Decimal:
+        """Nadwyzka wzgledna w najciasniejszym roku rozliczenia.
+
+        Bez profilu wraca miara calookresowa — nie zero. Zero znaczyloby "brak
+        nadwyzki", a to nie to samo co "nie wiadomo, jak sie rozklada".
+        """
+        najgorszy = self.okres_najgorszy
+        if najgorszy is None:
+            return self.nadwyzka_wzgledna
+        return najgorszy.nadwyzka_wzgledna
+
+    @property
+    def profil_zaostrza_werdykt(self) -> bool:
+        """Czy najgorszy rok wypada zauwazalnie gorzej niz srednia calookresowa.
+
+        Prawda znaczy, ze nadwyzka nie jest rozlozona rowno i ze rachunek
+        usredniony pokazywalby wynik lepszy niz stan faktyczny w najciasniejszym
+        momencie rozliczenia.
+
+        Prog istotnosci nie jest kosmetyka. Ostatni punkt profilu jest z definicji
+        rowny miary calookresowej, wiec przy rownym rozkladzie roznica wychodzi
+        zerowa co do arytmetyki dziesietnej, ale nie co do ostatniej cyfry
+        `Decimal`. Bez progu kazdy wariant dostawalby ostrzezenie o nierownym
+        rozkladzie — takze ten, w ktorym rozklad jest rowny.
+        """
+        return (
+            self.nadwyzka_wzgledna_najgorsza - self.nadwyzka_wzgledna
+            > ISTOTNA_ROZNICA_PROFILU
+        )
+
     @property
     def przechodzi(self) -> bool:
-        return self.nadwyzka_roczna <= self.tolerancja_kwotowo
+        """Werdykt na NAJGORSZYM okresie rozliczenia, nie na sredniej.
+
+        Ostatni punkt profilu jest rowny wielkosci calookresowej, wiec ta miara
+        nigdy nie jest lagodniejsza od poprzedniej — moze byc tylko ostrzejsza.
+        """
+        return self.nadwyzka_wzgledna_najgorsza <= self.prog_tolerancji
+
+    @property
+    def przechodzi_przy_alternatywnym_progu(self) -> Optional[bool]:
+        """Werdykt przy drugim odczycie zbiegu progow. None, gdy zbiegu nie ma."""
+        if self.prog_tolerancji_alternatywny is None:
+            return None
+        return self.nadwyzka_wzgledna_najgorsza <= self.prog_tolerancji_alternatywny
+
+    @property
+    def werdykt_zalezy_od_zalozenia(self) -> bool:
+        """Czy o wyniku przesadza samo zalozenie o progu, a nie dane."""
+        alternatywny = self.przechodzi_przy_alternatywnym_progu
+        return alternatywny is not None and alternatywny != self.przechodzi
 
     @property
     def kwota_do_zwrotu(self) -> Decimal:
@@ -251,29 +400,43 @@ def ujecie_gruntu(
 # Rozsadny zysk
 # ---------------------------------------------------------------------------
 
-def rozsadny_zysk(
+def rozsadny_zysk_lata(
     w: Wejscie, fin: FinansowaniePuli, lat: int, udzial_pum: Decimal
-) -> Decimal:
-    """Rozsadny zysk (RZ).
+) -> Tuple[Decimal, ...]:
+    """Rozsadny zysk (RZ) rozlozony na lata okresu powierzenia.
 
     Specyfikacja wskazuje zrodlo stopy — IRS dla kontraktu 20-letniego na bazie
     WIBOR 3M, publikowany przez BGK w BIP przed naborem (§ 6 ust. 5 rozp. 1897;
     § 12 ust. 10 rozp. 766) — ale nie podaje wzoru. Metoda jest przelacznikiem
     z jawnym oznaczeniem zalozenia; patrz LUKI.md.
+
+    Przy metodzie KWOTA_WPROST uzytkownik podaje jedna liczbe dla calego okresu.
+    Rozklad rowny jest wtedy DODATKOWYM zalozeniem — kwota wprost nie ma wlasnego
+    profilu czasowego. Przy metodzie kapitalowej rozklad wynika wprost ze wzoru.
     """
+    if lat <= 0:
+        return ()
     if w.przelaczniki.metoda_rozsadnego_zysku is MetodaRozsadnegoZysku.KWOTA_WPROST:
-        kwota = w.rekompensata.rozsadny_zysk_kwota or ZERO
-        return kwota * udzial_pum
+        kwota = (w.rekompensata.rozsadny_zysk_kwota or ZERO) * udzial_pum
+        rata = kwota / Decimal(lat)
+        return tuple(rata for _ in range(lat))
 
     # ZALOZENIE: godziwy zwrot ze srodkow wlasnych zaangazowanych w przedsiewziecie,
     # naliczany stopa IRS BGK rocznie i dyskontowany stopa bazowa KE — tak samo
     # jak strumien kosztow netto, zeby obie strony nierownosci byly porownywalne.
     kapital = max(ZERO, fin.kapital_inwestora)
     rb = w.parametry_zewnetrzne.stopa_bazowa_ke
-    rz = ZERO
-    for rok in range(1, lat + 1):
-        rz += kapital * w.parametry_zewnetrzne.stopa_irs_bgk / (JEDEN + rb) ** (rok - 1)
-    return rz
+    return tuple(
+        kapital * w.parametry_zewnetrzne.stopa_irs_bgk / (JEDEN + rb) ** (rok - 1)
+        for rok in range(1, lat + 1)
+    )
+
+
+def rozsadny_zysk(
+    w: Wejscie, fin: FinansowaniePuli, lat: int, udzial_pum: Decimal
+) -> Decimal:
+    """Rozsadny zysk (RZ) dla calego okresu — suma rozkladu rocznego."""
+    return sum(rozsadny_zysk_lata(w, fin, lat, udzial_pum), ZERO)
 
 
 # ---------------------------------------------------------------------------
@@ -301,6 +464,31 @@ def _koszty_inwestycyjne(w: Wejscie, pula: PulaKosztow, rok: int, lat: int) -> D
     return podstawa / Decimal(okres)
 
 
+def _prog_tolerancji(
+    w: Wejscie, sciezka: str, edb_grantu: Decimal, edb_kredytu: Decimal
+) -> Tuple[Decimal, str, Optional[Decimal]]:
+    """Rozstrzyga prog tolerancji. Zwraca (prog, uzasadnienie, prog alternatywny).
+
+    Pakiet naprawczy nr 2, rozdz. 2. Dopoki pula ma jeden instrument, odczyt jest
+    jednoznaczny i prog alternatywny nie istnieje. Gdy ma oba — dotacje i kredyt —
+    zaden przepis nie mowi, ktory rezim wiaze, wiec rozstrzyga przelacznik,
+    a drugi mozliwy odczyt wraca razem z wynikiem, zeby bylo widac, ile zalezy
+    od samego zalozenia.
+    """
+    if edb_grantu <= ZERO or edb_kredytu <= ZERO:
+        return prawo.prog_tolerancji_nadwyzki(sciezka), "", None
+    regula = w.przelaczniki.prog_tolerancji_przy_dwoch_instrumentach.value
+    prog, uzasadnienie = prawo.prog_tolerancji_dwa_instrumenty(
+        regula, edb_grantu, edb_kredytu
+    )
+    mozliwe = {
+        prawo.prog_tolerancji_dwa_instrumenty(r, edb_grantu, edb_kredytu)[0]
+        for r in prawo.REGULY_PROGU
+    }
+    inne = sorted(mozliwe - {prog})
+    return prog, uzasadnienie, (inne[0] if inne else None)
+
+
 def _rekompensata_puli(
     w: Wejscie,
     pula: PulaKosztow,
@@ -309,6 +497,7 @@ def _rekompensata_puli(
     h: Optional[Harmonogram],
     edb_kredytu: Decimal,
     wsparcie_dodatkowe: Decimal,
+    edb_kredytu_lata: Tuple[Decimal, ...] = (),
 ) -> RekompensataPuli:
     sciezka_kredytowa = proj.sciezka == "kredyt"
     lat = proj.okres_powierzenia_lat
@@ -344,7 +533,11 @@ def _rekompensata_puli(
         )
 
     kn = sum((rok.netto_zdyskontowane for rok in lata), ZERO)
-    rz = rozsadny_zysk(w, fin, lat, pula.udzial_pum)
+    rz_lata = rozsadny_zysk_lata(w, fin, lat, pula.udzial_pum)
+    edb_grantu = edb_grant(fin.grant)
+    prog, uzasadnienie, prog_alternatywny = _prog_tolerancji(
+        w, proj.sciezka, edb_grantu, edb_kredytu
+    )
 
     return RekompensataPuli(
         nazwa=pula.nazwa,
@@ -352,12 +545,16 @@ def _rekompensata_puli(
         okres_powierzenia_lat=lat,
         lata=tuple(lata),
         kn=kn,
-        rz=rz,
-        edb_grantu=edb_grant(fin.grant),
+        rz=sum(rz_lata, ZERO),
+        edb_grantu=edb_grantu,
         edb_kredytu=edb_kredytu,
         wsparcie_dodatkowe=wsparcie_dodatkowe,
-        prog_tolerancji=prawo.prog_tolerancji_nadwyzki(proj.sciezka),
+        prog_tolerancji=prog,
         grunt_ujecie=opis_gruntu,
+        edb_kredytu_lata=edb_kredytu_lata,
+        rz_lata=rz_lata,
+        prog_tolerancji_uzasadnienie=uzasadnienie,
+        prog_tolerancji_alternatywny=prog_alternatywny,
     )
 
 
@@ -412,6 +609,13 @@ def build(
             fin.harmonogram_kredytu if proj.spoleczna.sciezka == "kredyt" else None,
             edb_kredytu_spoleczna,
             wsparcie_dodatkowe * a.spoleczna.udzial_pum,
+            edb_kredytu_lata=(
+                edb_dla_harmonogramu_lata(
+                    fin.harmonogram_kredytu, w.parametry_zewnetrzne
+                )
+                if proj.spoleczna.sciezka == "kredyt"
+                else ()
+            ),
         )
     komunalna = None
     if proj.komunalna.aktywna:
@@ -427,7 +631,7 @@ def build(
 
     laczna = None
     if w.przelaczniki.hybryda_jako_jedno_przedsiewziecie and spoleczna and komunalna:
-        laczna = _scal(spoleczna, komunalna)
+        laczna = _scal(w, spoleczna, komunalna)
         ostrzezenia.append(
             Ostrzezenie(
                 kod="REKOMPENSATA_JEDEN_TEST",
@@ -447,26 +651,92 @@ def build(
             )
         )
 
-    for pula in (spoleczna, komunalna):
-        if pula is None or pula.nadwyzka <= ZERO:
+    for pula in _badane(spoleczna, komunalna, laczna):
+        if pula.prog_tolerancji_alternatywny is None:
+            continue
+        alternatywny = pula.przechodzi_przy_alternatywnym_progu
+        zalezy = pula.werdykt_zalezy_od_zalozenia
+        rozstrzygniecie = (
+            "PRZY DRUGIM ODCZYCIE WYNIK JEST ODWROTNY: "
+            + ("test przechodzi" if alternatywny else "test nie przechodzi")
+            + ". O werdykcie przesadza samo zalozenie, nie dane."
+            if zalezy
+            else "Przy drugim odczycie werdykt jest taki sam, wiec zalozenie nie wazy."
+        )
+        ostrzezenia.append(
+            Ostrzezenie(
+                kod="ZALOZENIE_PROG_TOLERANCJI_DWA_INSTRUMENTY",
+                tresc=(
+                    f"Pula {pula.nazwa} laczy dotacje z kredytem, a kazdy z instrumentow ma "
+                    f"wlasny prog tolerancji nadwyzki: {prawo.PROG_TOLERANCJI_NADWYZKI_GRANT:.0%} "
+                    f"(§ 7 ust. 9 rozp. 1897) i {prawo.PROG_TOLERANCJI_NADWYZKI_KREDYT:.0%} "
+                    f"(§ 13 ust. 8 rozp. 766). Zaden przepis nie rozstrzyga zbiegu. Przyjeto "
+                    f"{pula.prog_tolerancji:.0%} — {pula.prog_tolerancji_uzasadnienie}. "
+                    f"Odczyt alternatywny daje {pula.prog_tolerancji_alternatywny:.0%}. "
+                    f"{rozstrzygniecie}"
+                ),
+                podstawa=(
+                    "§ 7 ust. 9 rozp. Dz.U. 2025 poz. 1897; § 13 ust. 8 rozp. t.j. Dz.U. 2021 "
+                    "poz. 766 — zbieg nierozstrzygniety, pakiet naprawczy nr 2 rozdz. 2"
+                ),
+                tresc_potoczna=(
+                    f"Ta pula korzysta z dotacji i z kredytu naraz, a przepisy podają dla nich "
+                    f"różne limity nadwyżki pomocy: {prawo.PROG_TOLERANCJI_NADWYZKI_GRANT:.0%} "
+                    f"i {prawo.PROG_TOLERANCJI_NADWYZKI_KREDYT:.0%}. Przyjęto ostrożniejszy "
+                    f"({pula.prog_tolerancji:.0%})."
+                    + (
+                        " Przy drugim odczycie wynik testu jest odwrotny — to założenie, a nie "
+                        "liczby, przesądza o odpowiedzi."
+                        if zalezy else ""
+                    )
+                ),
+                waga=Waga.ZMIENIA_WERDYKT if zalezy else Waga.ZMIENIA_KWOTE,
+            )
+        )
+
+    for pula in _badane(spoleczna, komunalna, laczna):
+        if pula.nadwyzka <= ZERO or not pula.profil_zaostrza_werdykt:
+            continue
+        najgorszy = pula.okres_najgorszy
+        ostrzezenia.append(
+            Ostrzezenie(
+                kod="NADWYZKA_ROZLOZONA_NIEROWNO",
+                tresc=(
+                    f"Nadwyzka puli {pula.nazwa} nie rozklada sie rowno w okresie powierzenia. "
+                    f"Usredniona wynosi {pula.nadwyzka_wzgledna:.1%} rekompensaty, ale w roku "
+                    f"{najgorszy.rok} stan rozliczenia narastajaco daje "
+                    f"{najgorszy.nadwyzka_wzgledna:.1%}. Werdykt oparty jest na roku najgorszym, "
+                    f"bo prog {pula.prog_tolerancji:.0%} obowiazuje w kazdym rozliczeniu, "
+                    "a nie tylko na koniec okresu."
+                ),
+                podstawa="§ 7 ust. 9 rozp. Dz.U. 2025 poz. 1897; § 13 ust. 8 rozp. t.j. Dz.U. 2021 poz. 766",
+                tresc_potoczna=(
+                    f"Nadwyżka pomocy nie rozkłada się równo: średnio {pula.nadwyzka_wzgledna:.1%}, "
+                    f"ale w roku {najgorszy.rok} narastająco {najgorszy.nadwyzka_wzgledna:.1%}. "
+                    "Liczy się rok najgorszy."
+                ),
+                waga=Waga.ZMIENIA_WERDYKT,
+            )
+        )
+
+    for pula in _badane(spoleczna, komunalna, laczna):
+        if pula.nadwyzka <= ZERO:
             continue
         ostrzezenia.append(
             Ostrzezenie(
                 kod="ZALOZENIE_OKRES_ROZLICZENIOWY_NADWYZKI",
                 tresc=(
-                    f"Nadwyzka puli {pula.nazwa} ({pula.nadwyzka:.2f} zl) powstaje w calym "
-                    f"{pula.okres_powierzenia_lat}-letnim okresie powierzenia i zostala "
-                    f"sprowadzona do jednego roku ({pula.nadwyzka_roczna:.2f} zl), zeby "
-                    f"porownac ja z progiem {pula.prog_tolerancji:.0%} sredniej rocznej "
-                    "rekompensaty. Przepis odnosi prog do okresu rozliczeniowego, a model "
-                    "nie odwzorowuje jego dlugosci — annualizacja jest przyblizeniem. "
-                    "Gdyby okres rozliczeniowy byl krotszy niz okres powierzenia, nadwyzka "
-                    "moglaby rozlozyc sie nierowno i przekroczyc prog w pojedynczym okresie."
+                    f"Nadwyzka puli {pula.nazwa} ({pula.nadwyzka:.2f} zl) badana jest w ujeciu "
+                    f"narastajacym, rok po roku przez caly {pula.okres_powierzenia_lat}-letni "
+                    f"okres powierzenia, i porownywana z progiem {pula.prog_tolerancji:.0%} "
+                    "rekompensaty otrzymanej do danego roku. Przepis odnosi prog do okresu "
+                    "rozliczeniowego, a model nie zna jego dlugosci — profil roczny jest "
+                    "najblizszym przyblizeniem, jakie da sie zbudowac bez tej danej."
                 ),
                 podstawa="§ 7 ust. 9 rozp. Dz.U. 2025 poz. 1897; § 13 ust. 8 rozp. t.j. Dz.U. 2021 poz. 766",
                 tresc_potoczna=(
-                    "Nadwyżka rozłożona jest na cały okres umowy. Bank rozlicza ją w krótszych "
-                    "okresach, więc w pojedynczym rozliczeniu może wypaść wyżej niż tu."
+                    "Nadwyżka liczona jest narastająco, rok po roku. Bank rozlicza ją w okresach "
+                    "wskazanych w umowie — jeżeli będą inne, wynik może się przesunąć."
                 ),
                 waga=Waga.ZMIENIA_KWOTE,
             )
@@ -501,7 +771,19 @@ def build(
     )
 
 
-def _scal(a: RekompensataPuli, b: RekompensataPuli) -> RekompensataPuli:
+def _badane(spoleczna, komunalna, laczna) -> Tuple[RekompensataPuli, ...]:
+    """Pule faktycznie badane — przy hybrydzie jako jednym przedsiewzieciu jedna.
+
+    Ostrzezenia musza dotyczyc tego samego rachunku, ktory daje werdykt. Gdyby
+    szly po pulach skladowych mimo scalenia, opisywalyby progi i nadwyzki,
+    ktorych wynik nie uzywa.
+    """
+    if laczna is not None:
+        return (laczna,)
+    return tuple(p for p in (spoleczna, komunalna) if p is not None)
+
+
+def _scal(w: Wejscie, a: RekompensataPuli, b: RekompensataPuli) -> RekompensataPuli:
     """Laczy dwie pule w jeden rachunek rekompensaty.
 
     Prog tolerancji bierze sie ze sciezki kredytowej, jezeli ktorakolwiek pula
@@ -524,6 +806,11 @@ def _scal(a: RekompensataPuli, b: RekompensataPuli) -> RekompensataPuli:
                 czynnik_dyskonta=czesci[0].czynnik_dyskonta,
             )
         )
+    edb_grantu = a.edb_grantu + b.edb_grantu
+    edb_kredytu = a.edb_kredytu + b.edb_kredytu
+    prog, uzasadnienie, prog_alternatywny = _prog_tolerancji(
+        w, sciezka, edb_grantu, edb_kredytu
+    )
     return RekompensataPuli(
         nazwa="laczna",
         sciezka=sciezka,
@@ -531,9 +818,23 @@ def _scal(a: RekompensataPuli, b: RekompensataPuli) -> RekompensataPuli:
         lata=tuple(lata),
         kn=a.kn + b.kn,
         rz=a.rz + b.rz,
-        edb_grantu=a.edb_grantu + b.edb_grantu,
-        edb_kredytu=a.edb_kredytu + b.edb_kredytu,
+        edb_grantu=edb_grantu,
+        edb_kredytu=edb_kredytu,
         wsparcie_dodatkowe=a.wsparcie_dodatkowe + b.wsparcie_dodatkowe,
-        prog_tolerancji=prawo.prog_tolerancji_nadwyzki(sciezka),
+        prog_tolerancji=prog,
         grunt_ujecie=f"spoleczna: {a.grunt_ujecie}; komunalna: {b.grunt_ujecie}",
+        edb_kredytu_lata=_zsumuj_lata(a.edb_kredytu_lata, b.edb_kredytu_lata, lat),
+        rz_lata=_zsumuj_lata(a.rz_lata, b.rz_lata, lat),
+        prog_tolerancji_uzasadnienie=uzasadnienie,
+        prog_tolerancji_alternatywny=prog_alternatywny,
+    )
+
+
+def _zsumuj_lata(
+    a: Tuple[Decimal, ...], b: Tuple[Decimal, ...], lat: int
+) -> Tuple[Decimal, ...]:
+    """Suma dwoch szeregow rocznych, dopelniona zerami do dlugosci `lat`."""
+    return tuple(
+        (a[i] if i < len(a) else ZERO) + (b[i] if i < len(b) else ZERO)
+        for i in range(lat)
     )

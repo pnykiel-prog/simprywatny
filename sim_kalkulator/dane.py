@@ -190,6 +190,21 @@ class MetodaRozsadnegoZysku(str, Enum):
     KWOTA_WPROST = "kwota_wprost"
 
 
+class RegulaProgu(str, Enum):
+    """Ktory prog tolerancji wiaze pule laczaca dotacje z kredytem.
+
+    Pakiet naprawczy nr 2, rozdz. 2. Dotacja podlega rozporzadzeniu o wsparciu
+    finansowym (prog 10%), kredyt rozporzadzeniu o finansowaniu zwrotnym (20%).
+    Pula spoleczna ma oba instrumenty naraz, a zaden przepis nie mowi, ktory
+    rezim wtedy wiaze. Wartosc domyslna jest ZALOZENIEM — i to zalozeniem, ktore
+    potrafi samo przewrocic werdykt zbiorczy.
+    """
+
+    NIZSZY = prawo.REGULA_PROGU_NIZSZY
+    WYZSZY = prawo.REGULA_PROGU_WYZSZY
+    WEDLUG_INSTRUMENTU_DOMINUJACEGO = prawo.REGULA_PROGU_DOMINUJACY
+
+
 # ---------------------------------------------------------------------------
 # Warstwa wspolna
 # ---------------------------------------------------------------------------
@@ -445,6 +460,9 @@ class Przelaczniki:
     # najemca calej puli jest gmina, wiec ryzyko pustostanu zostaje po jej stronie.
     # ZALOZENIE — zmienia wynik testu 2, wiec jest przelacznikiem, nie zaszyta reguła.
     pustostany_takze_w_puli_komunalnej: bool = False
+    # Pakiet nr 2, rozdz. 2 — zbieg progow tolerancji w puli laczacej dotacje
+    # z kredytem. Domyslnie prog NIZSZY, jako ostrozniejszy. ZALOZENIE.
+    prog_tolerancji_przy_dwoch_instrumentach: RegulaProgu = RegulaProgu.NIZSZY
 
 
 @dataclass(frozen=True)
@@ -805,6 +823,17 @@ def zbuduj(dane: Mapping[str, Any], na_dzien: Optional[_dt.date] = None) -> Wejs
             f"'przelaczniki.koszty_inwestycyjne_w_kn' ma nieznana wartosc {ujecie_surowe!r}. "
             f"Dozwolone: {dozwolone}."
         ) from exc
+    regula_surowa = spr.get(
+        "prog_tolerancji_przy_dwoch_instrumentach", RegulaProgu.NIZSZY.value
+    )
+    try:
+        regula_progu = RegulaProgu(regula_surowa)
+    except ValueError as exc:
+        dozwolone = ", ".join(r.value for r in RegulaProgu)
+        raise BladWalidacji(
+            f"'przelaczniki.prog_tolerancji_przy_dwoch_instrumentach' ma nieznana wartosc "
+            f"{regula_surowa!r}. Dozwolone: {dozwolone}."
+        ) from exc
     przelaczniki = Przelaczniki(
         hybryda_jako_jedno_przedsiewziecie=bool(
             spr.get("hybryda_jako_jedno_przedsiewziecie", False)
@@ -825,6 +854,7 @@ def zbuduj(dane: Mapping[str, Any], na_dzien: Optional[_dt.date] = None) -> Wejs
         pustostany_takze_w_puli_komunalnej=bool(
             spr.get("pustostany_takze_w_puli_komunalnej", False)
         ),
+        prog_tolerancji_przy_dwoch_instrumentach=regula_progu,
     )
 
     wejscie = Wejscie(

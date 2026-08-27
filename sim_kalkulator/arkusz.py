@@ -1546,6 +1546,7 @@ def _rekompensata_puli(ws, wiersz, rej, wynik, p, spoleczna, rek, proj):
         ws.cell(row=w, column=10,
                 value=f"=(1+{rej['rb']})^({rok}-1)").number_format = "0.0000"
         ws.cell(row=w, column=11, value=f"=(F{w}-I{w})/J{w}").number_format = KWOTA
+        rej.zapisz(f"rek.{p}.netto_rok_{rok}", "Rekompensata", _bezwzgledny("K", w))
         wiersz += 1
     ostatni = wiersz - 1
 
@@ -1634,10 +1635,37 @@ def _rekompensata_puli(ws, wiersz, rej, wynik, p, spoleczna, rek, proj):
     rej.zapisz(f"rek.{p}.srednia", "Rekompensata", _bezwzgledny("K", wiersz))
     wiersz += 1
 
-    prog = rej["prawo.tol_kredyt"] if sciezka_kredytowa else rej["prawo.tol_grant"]
-    etykieta("Prog tolerancji nadwyzki",
-             "§ 13 ust. 8 rozp. 766" if sciezka_kredytowa else "§ 7 ust. 9 rozp. 1897")
-    komorka = ws.cell(row=wiersz, column=11, value=f"={rej[f'rek.{p}.srednia']}*{prog}")
+    pula_wyniku = _pula_rekompensaty(wynik, p)
+    prog_wartosc = (
+        pula_wyniku.prog_tolerancji if pula_wyniku is not None
+        else prawo.prog_tolerancji_nadwyzki("kredyt" if sciezka_kredytowa else "grant")
+    )
+    alternatywny = pula_wyniku.prog_tolerancji_alternatywny if pula_wyniku else None
+    if alternatywny is None:
+        uwaga_progu = "§ 13 ust. 8 rozp. 766" if sciezka_kredytowa else "§ 7 ust. 9 rozp. 1897"
+    else:
+        uwaga_progu = (
+            "ZBIEG PROGOW: pula ma dotacje i kredyt naraz, a zaden przepis nie mowi, "
+            f"ktory rezim wiaze. Przyjeto {prog_wartosc:.0%}; odczyt alternatywny to "
+            f"{alternatywny:.0%}. Komorka jest ZALOZENIEM — podmien i przelicz, zeby "
+            "zobaczyc drugi wariant. Patrz LUKI.md."
+        )
+    etykieta("Prog tolerancji nadwyzki — udzial", uwaga_progu)
+    komorka = ws.cell(row=wiersz, column=11, value=float(prog_wartosc))
+    komorka.number_format = PROCENT_DOKLADNY
+    if alternatywny is not None:
+        komorka.fill = ZOLTE
+    rej.zapisz(f"rek.{p}.prog", "Rekompensata", _bezwzgledny("K", wiersz))
+    wiersz += 1
+
+    wiersz = _profil_nadwyzki(ws, wiersz, rej, p, wynik, lat, sciezka_kredytowa)
+
+    etykieta("Prog tolerancji nadwyzki — kwotowo",
+             "Udzial progu odniesiony do sredniej rocznej rekompensaty.")
+    komorka = ws.cell(
+        row=wiersz, column=11,
+        value=f"={rej[f'rek.{p}.srednia']}*{rej[f'rek.{p}.prog']}",
+    )
     komorka.number_format = KWOTA
     rej.zapisz(f"rek.{p}.tolerancja", "Rekompensata", _bezwzgledny("K", wiersz))
     wiersz += 1
@@ -1645,7 +1673,7 @@ def _rekompensata_puli(ws, wiersz, rej, wynik, p, spoleczna, rek, proj):
     etykieta("Kwota do zwrotu do Funduszu Doplat")
     komorka = ws.cell(
         row=wiersz, column=11,
-        value=f"=IF({rej[f'rek.{p}.nadwyzka']}<={rej[f'rek.{p}.tolerancja']},0,"
+        value=f"=IF({rej[f'rek.{p}.najgorsza']}<={rej[f'rek.{p}.prog']},0,"
               f"{rej[f'rek.{p}.nadwyzka']})",
     )
     komorka.number_format = KWOTA
@@ -1653,14 +1681,113 @@ def _rekompensata_puli(ws, wiersz, rej, wynik, p, spoleczna, rek, proj):
     rej.zapisz(f"rek.{p}.zwrot", "Rekompensata", _bezwzgledny("K", wiersz))
     wiersz += 1
 
-    etykieta("WERDYKT")
+    etykieta("WERDYKT", "Na roku najgorszym profilu, nie na sredniej okresu.")
     komorka = ws.cell(
         row=wiersz, column=11,
-        value=f'=IF({rej[f"rek.{p}.nadwyzka"]}<={rej[f"rek.{p}.tolerancja"]},'
+        value=f'=IF({rej[f"rek.{p}.najgorsza"]}<={rej[f"rek.{p}.prog"]},'
               f'"przechodzi","nie przechodzi")',
     )
     komorka.font = Font(bold=True)
     rej.zapisz(f"rek.{p}.werdykt", "Rekompensata", _bezwzgledny("K", wiersz))
+    wiersz += 1
+    return wiersz
+
+
+def _pula_rekompensaty(wynik: Wynik, p: str):
+    """Pula rekompensaty odpowiadajaca skrotowi 'spol'/'kom' w rejestrze."""
+    return wynik.rekompensata.spoleczna if p == "spol" else wynik.rekompensata.komunalna
+
+
+def _profil_nadwyzki(
+    ws: Worksheet, wiersz: int, rej: Rejestr, p: str, wynik: Wynik,
+    lat: int, sciezka_kredytowa: bool,
+) -> int:
+    """Profil nadwyzki rok po roku — pakiet naprawczy nr 2, rozdz. 3.
+
+    Rachunek usredniony zakladal rowny rozklad. Tu rekompensata i kwota
+    dopuszczalna narastaja rok po roku, a werdykt bierze rok najgorszy. Wszystkie
+    skladniki maja rozklad wynikajacy z modelu, wiec arkusz liczy je formulami —
+    nie przepisuje wyniku silnika.
+    """
+    metoda = wynik.wejscie.przelaczniki.metoda_rozsadnego_zysku
+    wiersz += 1
+    ws.cell(row=wiersz, column=1, value="PROFIL NADWYZKI — narastajaco").font = Font(bold=True)
+    ws.cell(
+        row=wiersz, column=4,
+        value="Werdykt na roku najgorszym. Dotacja splywa na poczatku, "
+              "przychody czynszowe przez caly okres.",
+    ).font = Font(size=9, color="FF666666")
+    wiersz += 1
+
+    naglowki = ["Rok", "RUOIG rok", "RUOIG narast.", "RZ rok", "Dopuszczalna rok",
+                "Dopuszczalna narast.", "Nadwyzka narast.", "Nadwyzka wzgledna"]
+    for kol, tytul in enumerate(naglowki, start=1):
+        komorka = ws.cell(row=wiersz, column=kol, value=tytul)
+        komorka.font = Font(bold=True, size=9)
+        komorka.border = RAMKA_DOL
+        komorka.alignment = Alignment(wrap_text=True)
+    wiersz += 1
+
+    pierwszy = wiersz
+    for rok in range(1, lat + 1):
+        w = wiersz
+        komorka = ws.cell(row=w, column=1, value=str(rok))
+        komorka.number_format = TEKST
+        komorka.alignment = Alignment(horizontal="right")
+
+        # EDB grantu i wsparcie dodatkowe splywaja na etapie inwestycji — rok 1.
+        skladniki = []
+        if rok == 1:
+            skladniki.append(f"{rej[f'rek.{p}.edb_grant']}+{rej[f'rek.{p}.dodatkowe']}")
+        if sciezka_kredytowa and rej.ma(f"rek.{p}.edb_rok_{rok}"):
+            skladniki.append(rej[f"rek.{p}.edb_rok_{rok}"])
+        ws.cell(row=w, column=2, value="=" + ("+".join(skladniki) or "0")).number_format = KWOTA
+        ws.cell(
+            row=w, column=3,
+            value=f"=B{w}" if rok == 1 else f"=C{w - 1}+B{w}",
+        ).number_format = KWOTA
+
+        if metoda is MetodaRozsadnegoZysku.KWOTA_WPROST:
+            # Kwota podana wprost nie ma wlasnego profilu — rozklad rowny jest
+            # DODATKOWYM zalozeniem, tym samym co w silniku.
+            rz_rok = f"={rej[f'rek.{p}.rz']}/{lat}"
+        else:
+            rz_rok = (
+                f"=MAX(0,{rej[f'{p}.wklad']})*{rej['irs']}/(1+{rej['rb']})^({rok}-1)"
+            )
+        ws.cell(row=w, column=4, value=rz_rok).number_format = KWOTA
+        ws.cell(
+            row=w, column=5,
+            value=f"={rej[f'rek.{p}.netto_rok_{rok}']}+D{w}",
+        ).number_format = KWOTA
+        ws.cell(
+            row=w, column=6,
+            value=f"=E{w}" if rok == 1 else f"=F{w - 1}+E{w}",
+        ).number_format = KWOTA
+        ws.cell(row=w, column=7, value=f"=MAX(0,C{w}-F{w})").number_format = KWOTA
+        ws.cell(
+            row=w, column=8, value=f'=IF(C{w}<=0,0,G{w}/C{w})'
+        ).number_format = PROCENT_DOKLADNY
+        wiersz += 1
+    ostatni = wiersz - 1
+
+    ws.cell(
+        row=wiersz, column=1, value="Najgorszy rok — nadwyzka wzgledna"
+    ).font = Font(bold=True)
+    komorka = ws.cell(row=wiersz, column=11, value=f"=MAX(H{pierwszy}:H{ostatni})")
+    komorka.number_format = PROCENT_DOKLADNY
+    komorka.font = Font(bold=True)
+    rej.zapisz(f"rek.{p}.najgorsza", "Rekompensata", _bezwzgledny("K", wiersz))
+    wiersz += 1
+
+    ws.cell(row=wiersz, column=1, value="Najgorszy rok — numer").font = Font(bold=True)
+    komorka = ws.cell(
+        row=wiersz, column=11,
+        value=f"=INDEX(A{pierwszy}:A{ostatni},MATCH(MAX(H{pierwszy}:H{ostatni}),"
+              f"H{pierwszy}:H{ostatni},0))",
+    )
+    komorka.number_format = TEKST
+    rej.zapisz(f"rek.{p}.rok_najgorszy", "Rekompensata", _bezwzgledny("K", wiersz))
     wiersz += 1
     return wiersz
 
@@ -1731,6 +1858,8 @@ def _edb_kredytu(ws: Worksheet, wiersz: int, rej: Rejestr, p: str, wynik: Wynik)
         ).number_format = KWOTA
         ws.cell(row=w, column=4, value=f"=(1+{rej['rd']})^{i}").number_format = "0.0000"
         ws.cell(row=w, column=5, value=f"=(B{w}+C{w})/D{w}").number_format = KWOTA
+        # Wklad roku i do EDB — potrzebny profilowi nadwyzki (pakiet nr 2, rozdz. 3).
+        rej.zapisz(f"rek.{p}.edb_rok_{i}", "Rekompensata", _bezwzgledny("E", w))
         wiersz += 1
     ostatni = wiersz - 1
 

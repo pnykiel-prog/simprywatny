@@ -130,6 +130,16 @@ PROG_TOLERANCJI_NADWYZKI_GRANT = Decimal("0.10")
 # § 13 ust. 8 rozp. 766 — prog tolerancji nadwyzki, sciezka kredytowa
 PROG_TOLERANCJI_NADWYZKI_KREDYT = Decimal("0.20")
 
+# Zbieg progow — pakiet naprawczy nr 2, rozdz. 2. Pula spoleczna ma dotacje
+# I kredyt naraz, a zaden przepis nie mowi, ktory prog wtedy wiaze. Regula jest
+# przelacznikiem z jawnym oznaczeniem zalozenia; wartosci nie sa odczytem.
+REGULA_PROGU_NIZSZY = "nizszy"
+REGULA_PROGU_WYZSZY = "wyzszy"
+REGULA_PROGU_DOMINUJACY = "wedlug_instrumentu_dominujacego"
+REGULY_PROGU: Tuple[str, ...] = (
+    REGULA_PROGU_NIZSZY, REGULA_PROGU_WYZSZY, REGULA_PROGU_DOMINUJACY,
+)
+
 # § 12 ust. 7 rozp. 766 — grunt wniesiony aportem w sciezce kredytowej jest
 # kosztem, ale tylko do tego udzialu calkowitych kosztow przedsiewziecia
 GRUNT_APORT_LIMIT_W_KOSZTACH_KREDYT = Decimal("0.20")
@@ -519,12 +529,65 @@ def grunt_aport_maksymalny_w_kosztach(koszty_bez_gruntu: Decimal) -> Decimal:
 
 
 def prog_tolerancji_nadwyzki(sciezka: str) -> Decimal:
-    """Prog tolerancji nadwyzki rekompensaty wg sciezki wsparcia."""
+    """Prog tolerancji nadwyzki rekompensaty wg sciezki wsparcia.
+
+    Odczyt jednoinstrumentowy: pula z samym grantem podlega rozporzadzeniu
+    o wsparciu finansowym (10%), pula z finansowaniem zwrotnym rozporzadzeniu
+    o finansowaniu zwrotnym (20%). Gdy pula ma OBA instrumenty naraz — a tak jest
+    w puli spolecznej, ktora laczy dotacje z kredytem — rozstrzyga
+    `prog_tolerancji_dwa_instrumenty`.
+    """
     if sciezka == "grant":
         return PROG_TOLERANCJI_NADWYZKI_GRANT
     if sciezka == "kredyt":
         return PROG_TOLERANCJI_NADWYZKI_KREDYT
     raise ValueError("Nieznana sciezka wsparcia: %r (dopuszczalne: grant, kredyt)" % sciezka)
+
+
+def prog_tolerancji_dwa_instrumenty(
+    regula: str, edb_grantu: Decimal, edb_kredytu: Decimal
+) -> Tuple[Decimal, str]:
+    """Prog tolerancji dla puli, ktora laczy dotacje z kredytem.
+
+    ZALOZENIE, nie odczyt. Zaden z dwoch przepisow nie mowi, co sie dzieje, gdy
+    to samo przedsiewziecie korzysta z obu instrumentow naraz. Dotacja podlega
+    § 7 ust. 9 rozp. 1897 z progiem 10%, kredyt § 13 ust. 8 rozp. 766 z progiem
+    20%. Jezeli oba obowiazuja rownolegle, wiaze nizszy — i to jest wartosc
+    domyslna, jako ostrozniejsza.
+
+    Zwraca (prog, uzasadnienie). Uzasadnienie idzie do wyniku dosłownie, zeby
+    nikt nie musial zgadywac, skad wzial sie prog.
+    """
+    dwa = edb_grantu > Decimal(0) and edb_kredytu > Decimal(0)
+    if not dwa:
+        raise ValueError(
+            "prog_tolerancji_dwa_instrumenty wymaga obu instrumentow; "
+            f"EDB grantu={edb_grantu}, EDB kredytu={edb_kredytu}."
+        )
+    if regula == REGULA_PROGU_NIZSZY:
+        return (
+            min(PROG_TOLERANCJI_NADWYZKI_GRANT, PROG_TOLERANCJI_NADWYZKI_KREDYT),
+            "oba rozporzadzenia obowiazuja rownolegle, wiaze prog nizszy",
+        )
+    if regula == REGULA_PROGU_WYZSZY:
+        return (
+            max(PROG_TOLERANCJI_NADWYZKI_GRANT, PROG_TOLERANCJI_NADWYZKI_KREDYT),
+            "przedsiewziecie z finansowaniem zwrotnym podlega rezimowi rozp. 766 w calosci",
+        )
+    if regula == REGULA_PROGU_DOMINUJACY:
+        if edb_kredytu >= edb_grantu:
+            return (
+                PROG_TOLERANCJI_NADWYZKI_KREDYT,
+                "wiekszosc pomocy niesie kredyt, wiec rozstrzyga rozp. 766",
+            )
+        return (
+            PROG_TOLERANCJI_NADWYZKI_GRANT,
+            "wiekszosc pomocy niesie dotacja, wiec rozstrzyga rozp. 1897",
+        )
+    raise ValueError(
+        "Nieznana regula progu: %r (dopuszczalne: %s)"
+        % (regula, ", ".join(REGULY_PROGU))
+    )
 
 
 # Wykaz do zakladki `Podstawy_prawne` w arkuszu — pary (opis, wartosc, podstawa).
