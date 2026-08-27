@@ -173,6 +173,21 @@ class TestPrzeliczenie:
             "TAK" if r.domyka_sie else "NIE"
         )
 
+    def test_arkusz_nazywa_to_samo_ograniczenie_kredytu_co_silnik(self, przeliczony):
+        # Pakiet nr 2, rozdz. 4. Arkusz rozstrzyga to wlasna formula, wiec
+        # rozjazd znaczy, ze obie warstwy inaczej czytaja te sama kaskade minimow.
+        recalc, plik = przeliczony
+        wb = openpyxl.load_workbook(plik, data_only=True)
+        r = przelicz(wczytaj_yaml(DOMYKAJACY))
+        nazwy = {
+            "udzwig": "udzwig czynszowy",
+            "limit": "limit ustawowy",
+            "potrzeba": "faktyczna potrzeba",
+        }
+        assert komorka(wb["Pula_spoleczna"], "WIAZE").value == (
+            nazwy[r.ograniczenie_kredytu.wiazace]
+        )
+
     def test_asercja_edb_wychodzi_w_normie(self, przeliczony):
         recalc, plik = przeliczony
         wb = openpyxl.load_workbook(plik, data_only=True)

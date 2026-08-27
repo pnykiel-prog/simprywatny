@@ -48,7 +48,19 @@ class PunktSweepu:
     # Czy przy tym udziale wymagany czynsz spoleczny miesci sie pod stawka rynkowa.
     # None, gdy stawki rynkowej nie podano — wtedy tego sufitu po prostu nie ma.
     miesci_sie_w_rynku: Optional[bool] = None
+    # Czesc wymaganego wkladu, ktorej zaden czynsz nie domknie — pula komunalna
+    # nie ma kredytu (art. 5a ust. 3), a tylko kredyt zamienia przyszly czynsz
+    # na kapital poczatkowy. Pakiet nr 2, rozdz. 5: to jest most miedzy wykresem
+    # czynszowym a negocjacyjnym, bo wielkosc plateau rosnie z udzialem gminy.
+    wklad_poza_zasiegiem_czynszu: Optional[Decimal] = None
     powod_niepoliczalnosci: str = ""
+
+    @property
+    def wklad_do_domkniecia_czynszem(self) -> Optional[Decimal]:
+        """Czesc wkladu, ktora da sie zdjac podnoszac czynsz. Reszta zostaje."""
+        if self.wklad_wymagany is None or self.wklad_poza_zasiegiem_czynszu is None:
+            return None
+        return max(ZERO, self.wklad_wymagany - self.wklad_poza_zasiegiem_czynszu)
 
     @property
     def liczba_zdanych(self) -> int:
@@ -201,6 +213,10 @@ def _punkt(w: Wejscie, udzial: Decimal) -> PunktSweepu:
         wklad_wymagany=max(ZERO, wynik.finansowanie.wklad_gotowkowy_wymagany),
         czynsz_domykajacy=domykajacy,
         miesci_sie_w_rynku=miesci,
+        wklad_poza_zasiegiem_czynszu=min(
+            max(ZERO, wynik.finansowanie.wklad_gotowkowy_wymagany),
+            wynik.luka_poza_zasiegiem_czynszu,
+        ),
     )
 
 

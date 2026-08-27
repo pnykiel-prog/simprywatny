@@ -585,3 +585,179 @@ class TestProfiluNadwyzki:
         assert spoleczna["rok_najgorszy"] == 30
         assert spoleczna["werdykt_zalezy_od_zalozenia"] is True
         assert spoleczna["prog_tolerancji_alternatywny"] == pytest.approx(0.20)
+
+
+class TestWiazacegoOgraniczeniaKredytu:
+    """Pakiet nr 2, rozdz. 4 — kredyt jest minimum z trzech wielkosci."""
+
+    def test_niski_czynsz_wiaze_udzwig(self):
+        o = przelicz(
+            wspolne.wejscie(pula_spoleczna__czynsz_zakladany_m2_mies=14.0)
+        ).ograniczenie_kredytu
+        assert o.wiazace == "udzwig"
+        assert o.czynsz_jest_dzwignia is True
+        assert o.kwota < o.potrzebny and o.kwota < o.limit_ustawowy
+
+    def test_wysoki_czynsz_wiaze_potrzeba(self):
+        o = przelicz(
+            wspolne.wejscie(pula_spoleczna__czynsz_zakladany_m2_mies=30.0)
+        ).ograniczenie_kredytu
+        assert o.wiazace == "potrzeba"
+        assert o.czynsz_jest_dzwignia is False
+
+    def test_tryb_reczny_nazywa_zrodlo_kwoty(self):
+        dane = wspolne.zmien()
+        dane["przelaczniki"]["tryb_kredytu"] = "reczny"
+        from sim_kalkulator.dane import zbuduj
+
+        o = przelicz(
+            zbuduj(dane, na_dzien=wspolne.DATA_ODNIESIENIA)
+        ).ograniczenie_kredytu
+        assert o.wiazace == "reczny"
+        assert o.czynsz_jest_dzwignia is False
+
+    def test_kwota_w_ograniczeniu_to_kwota_ktora_weszla_do_montazu(self):
+        r = przelicz(wspolne.wejscie())
+        assert r.ograniczenie_kredytu.kwota == r.finansowanie.spoleczna.kredyt
+
+    def test_kaskada_niesie_nazwe_i_zdanie_przy_slupku_kredytu(self):
+        z = api.wynik_json(
+            przelicz(wspolne.wejscie(pula_spoleczna__czynsz_zakladany_m2_mies=30.0))
+        )
+        krok = next(
+            k for k in z["wykresy"]["kaskada"]["kroki"] if k["etykieta"] == "Kredyt"
+        )
+        assert krok["wiazace"] == "potrzeba"
+        assert "Wyższy czynsz nic tu nie zmieni" in krok["wiazace_zdanie"]
+        assert krok["czynsz_jest_dzwignia"] is False
+
+    def test_zdanie_zmienia_sie_razem_z_wiazacym_ograniczeniem(self):
+        def zdanie(czynsz):
+            z = api.wynik_json(
+                przelicz(wspolne.wejscie(pula_spoleczna__czynsz_zakladany_m2_mies=czynsz))
+            )
+            return next(
+                k for k in z["wykresy"]["kaskada"]["kroki"] if k["etykieta"] == "Kredyt"
+            )["wiazace_zdanie"]
+
+        assert "Podniesienie stawki zwiększy kredyt" in zdanie(14.0)
+        assert "nie ma czego" in zdanie(30.0).lower()
+
+
+class TestProguBezskutecznosci:
+    """Pakiet nr 2, rozdz. 5 — plateau na wykresie czynszowym ma nazwe."""
+
+    def test_prog_lezy_tam_gdzie_wklad_przestaje_reagowac(self):
+        r = przelicz(wspolne.wejscie(pula_spoleczna__czynsz_zakladany_m2_mies=14.0))
+        prog = r.czynsz_prog_bezskutecznosci
+        assert prog is not None
+        ponizej = przelicz(
+            wspolne.wejscie(pula_spoleczna__czynsz_zakladany_m2_mies=float(prog) - 2)
+        ).finansowanie.wklad_gotowkowy_wymagany
+        tuz_nad = przelicz(
+            wspolne.wejscie(pula_spoleczna__czynsz_zakladany_m2_mies=float(prog) + 1)
+        ).finansowanie.wklad_gotowkowy_wymagany
+        duzo_nad = przelicz(
+            wspolne.wejscie(pula_spoleczna__czynsz_zakladany_m2_mies=float(prog) + 6)
+        ).finansowanie.wklad_gotowkowy_wymagany
+        # Ponizej progu czynsz jeszcze dziala, powyzej — juz nie.
+        assert ponizej > tuz_nad
+        assert tuz_nad == duzo_nad
+
+    def test_plateau_rowna_sie_luce_poza_zasiegiem_czynszu(self):
+        r = przelicz(wspolne.wejscie(pula_spoleczna__czynsz_zakladany_m2_mies=30.0))
+        assert r.finansowanie.wklad_gotowkowy_wymagany == r.luka_poza_zasiegiem_czynszu
+
+    def test_wykres_czynszowy_niesie_prog_i_jego_opis(self):
+        z = api.wynik_json(przelicz(wspolne.wejscie()))
+        prog = z["wykresy"]["czynsz_poziomy"]["prog_bezskutecznosci"]
+        assert prog["pula"] == "spoleczna"
+        assert prog["stawka"] > 0
+        zastrzezenie = z["wykresy"]["czynsz_poziomy"]["zastrzezenie_do_wymaganego"]
+        assert "przestaje pomagać" in zastrzezenie
+
+    def test_w_trybie_recznym_progu_nie_ma(self):
+        # Kwote kredytu ustawia uzytkownik, wiec czynsz nie rusza jej ani ponizej,
+        # ani powyzej zadnej stawki — prog opisywalby mechanizm, ktorego nie ma.
+        dane = wspolne.zmien()
+        dane["przelaczniki"]["tryb_kredytu"] = "reczny"
+        from sim_kalkulator.dane import zbuduj
+
+        z = api.wynik_json(przelicz(zbuduj(dane, na_dzien=wspolne.DATA_ODNIESIENIA)))
+        assert z["wykresy"]["czynsz_poziomy"]["prog_bezskutecznosci"] is None
+
+    def test_rozbicie_wkladu_rosnie_wprost_z_udzialem_gminy(self):
+        s = wrazliwosc.sweep_udzialu(wspolne.wejscie(), krok=D("0.25"))
+        poza = [p.wklad_poza_zasiegiem_czynszu for p in s.punkty if p.policzalny]
+        assert poza[0] == D("0")
+        assert poza == sorted(poza)
+        assert poza[-1] > poza[0]
+
+    def test_rozbicie_sumuje_sie_do_calego_wkladu(self):
+        s = wrazliwosc.sweep_udzialu(wspolne.wejscie(), krok=D("0.25"))
+        for p in s.punkty:
+            if not p.policzalny:
+                continue
+            assert (
+                p.wklad_do_domkniecia_czynszem + p.wklad_poza_zasiegiem_czynszu
+                == p.wklad_wymagany
+            )
+
+    def test_sweep_json_podaje_obie_warstwy(self):
+        z = api.sweep_json(wspolne.wejscie())
+        assert z["podpis_rozbicia_wkladu"]
+        for punkt in z["punkty"]:
+            if not punkt["policzalny"]:
+                continue
+            assert punkt["wklad_poza_zasiegiem"] is not None
+            assert punkt["wklad_do_domkniecia_czynszem"] is not None
+
+
+APORT_INWESTORA = dict(
+    grunt__pochodzenie="inwestor", grunt__forma="aport_inwestora"
+)
+
+
+class TestWkladuRzeczowegoInwestora:
+    """Pakiet nr 2, rozdz. 6 — kaskada rozroznia, KTO wnosi grunt rzeczowo."""
+
+    def test_aport_inwestora_daje_wklad_rzeczowy_a_nabycie_nie(self):
+        aport = przelicz(wspolne.wejscie(**APORT_INWESTORA)).finansowanie
+        nabycie = przelicz(wspolne.wejscie()).finansowanie
+        assert aport.wklad_rzeczowy_inwestora_laczny > D("0")
+        assert nabycie.wklad_rzeczowy_inwestora_laczny == D("0")
+
+    def test_kaskada_podaje_gotowke_dzialke_i_sume(self):
+        k = api.wynik_json(przelicz(wspolne.wejscie(**APORT_INWESTORA)))["wykresy"]["kaskada"]
+        assert k["wklad_rzeczowy_inwestora"] == pytest.approx(2_800_000)
+        assert k["wklad_laczny"] == pytest.approx(
+            k["wymagany"] + k["wklad_rzeczowy_inwestora"]
+        )
+        assert "w gotówce plus działka" in k["zdanie"]
+        assert "Łącznie" in k["zdanie"]
+
+    def test_bez_aportu_zdanie_zostaje_jednoliczbowe(self):
+        k = api.wynik_json(przelicz(wspolne.wejscie()))["wykresy"]["kaskada"]
+        assert k["wklad_rzeczowy_inwestora"] == 0
+        assert k["wklad_laczny"] == k["wymagany"]
+        assert "plus działka" not in k["zdanie"]
+
+    def test_gotowka_zostaje_gotowka_a_wklad_laczny_ja_przewyzsza(self):
+        # Rozstrzygniecie na rzecz kwoty gotowkowej bylo sluszne i zostaje —
+        # inwestor nie wyklada na dzialke pieniedzy. Ale przy jego wlasnym aporcie
+        # sama gotowka zaniza rzeczywisty wklad kilkukrotnie, wiec obok niej stoi
+        # kwota laczna.
+        k = api.wynik_json(przelicz(wspolne.wejscie(**APORT_INWESTORA)))["wykresy"]["kaskada"]
+        assert k["wymagany"] < k["wklad_laczny"]
+        assert k["wklad_laczny"] / k["wymagany"] > 3
+
+    def test_grunt_od_gminy_nie_wchodzi_do_wkladu_inwestora(self):
+        # Dzierzawa: dzialka jest gminy, inwestor nie wnosi nic rzeczowo,
+        # a oplata roczna obciaza koszty biezace, nie kapital.
+        k = api.wynik_json(
+            przelicz(
+                wspolne.wejscie(grunt__pochodzenie="gmina", grunt__forma="dzierzawa")
+            )
+        )["wykresy"]["kaskada"]
+        assert k["wklad_rzeczowy_inwestora"] == 0
+        assert k["wklad_laczny"] == k["wymagany"]

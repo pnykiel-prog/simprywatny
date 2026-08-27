@@ -1164,6 +1164,43 @@ def _pula(wb: Workbook, wynik: Wynik, rej: Rejestr, spoleczna: bool) -> None:
         komorka.number_format = KWOTA
         komorka.font = Font(bold=True)
 
+        # Ktora z trzech wielkosci wiaze (pakiet nr 2, rozdz. 4). Bez tego
+        # zachowanie modelu — czynsz rosnie, kredyt stoi — wyglada na blad.
+        # Kolejnosc rozstrzygania przy remisie taka sama jak w silniku.
+        wiersz += 1
+        wiersz = _sekcja(ws, wiersz, "CO OGRANICZA KWOTE KREDYTU")
+        limit_ustawowy = f"{rej[f'{p}.koszty']}*{rej['prawo.kredyt_max_udzial']}"
+        for tytul, wzor, uwaga in (
+            ("Udzwig czynszowy",
+             f"=MIN({rej[f'{p}.pulapy']})",
+             "Najwiekszy kredyt, ktory uniesie ten czynsz w najgorszym roku."),
+            ("Limit ustawowy", f"={limit_ustawowy}",
+             "art. 15b ust. 2 ustawy z 26.10.1995."),
+            ("Faktyczna potrzeba", f"={potrzebny}",
+             "Koszty po dotacji, partycypacji i wkladzie rzeczowym."),
+        ):
+            ws.cell(row=wiersz, column=1, value=tytul)
+            ws.cell(row=wiersz, column=4, value=uwaga).font = Font(
+                size=9, color="FF666666")
+            k2 = ws.cell(row=wiersz, column=2, value=wzor)
+            k2.number_format = KWOTA
+            wiersz += 1
+
+        ws.cell(row=wiersz, column=1, value="WIAZE").font = Font(bold=True)
+        k2 = ws.cell(
+            row=wiersz, column=2,
+            value=(
+                f'=IF({potrzebny}<=MIN(MIN({rej[f"{p}.pulapy"]}),{limit_ustawowy}),'
+                f'"faktyczna potrzeba",'
+                f'IF({limit_ustawowy}<=MIN({rej[f"{p}.pulapy"]}),'
+                f'"limit ustawowy","udzwig czynszowy"))'
+            ),
+        )
+        k2.number_format = TEKST
+        k2.font = Font(bold=True)
+        rej.zapisz(f"{p}.wiazace_kredyt", nazwa, _bezwzgledny("B", wiersz))
+        wiersz += 1
+
     ws.freeze_panes = "B5"
 
 

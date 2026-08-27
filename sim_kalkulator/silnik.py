@@ -32,10 +32,54 @@ from .waluta import ZERO, na_m2, pelne_zlote_w_dol
 JEDEN = Decimal(1)
 
 
+# Ktora z trzech wielkosci ogranicza kwote kredytu (pakiet nr 2, rozdz. 4).
+WIAZE_UDZWIG = "udzwig"          # czynsz nie uniesie wiekszej raty
+WIAZE_LIMIT = "limit"            # art. 15b ust. 2 — 80% kosztow przedsiewziecia
+WIAZE_POTRZEBA = "potrzeba"      # po dotacji i partycypacji nie ma czego finansowac
+WIAZE_BRAK_KREDYTU = "brak"      # sciezka bezkredytowa
+WIAZE_RECZNY = "reczny"          # kwote ustawil uzytkownik
+
+
+@dataclass(frozen=True)
+class OgraniczenieKredytu:
+    """Kwota kredytu razem z odpowiedzia, co ja ogranicza.
+
+    Kredyt jest minimum z trzech wielkosci i bez podania, ktora wiaze,
+    zachowanie narzedzia wyglada na awarie: uzytkownik podnosi czynsz, a kwota
+    stoi w miejscu. Rozdz. 4 pakietu nr 2 — ta sama logika, ktorej specyfikacja
+    wymaga dla werdyktow, zastosowana o poziom nizej.
+    """
+
+    kwota: Decimal
+    udzwig: Optional[Decimal]        # najwiekszy kredyt, ktory uniesie czynsz
+    limit_ustawowy: Decimal
+    potrzebny: Decimal
+    wiazace: str
+
+    @property
+    def czynsz_jest_dzwignia(self) -> bool:
+        """Czy podniesienie czynszu w ogole ruszy kwote kredytu."""
+        return self.wiazace == WIAZE_UDZWIG
+
+
+def _puste_ograniczenie(powod: str) -> OgraniczenieKredytu:
+    return OgraniczenieKredytu(
+        kwota=ZERO, udzwig=None, limit_ustawowy=ZERO, potrzebny=ZERO, wiazace=powod,
+    )
+
+
 def kredyt_maksymalny_obslugiwalny(
     w: Wejscie, a: Alokacja, g: Granty,
     limity_s: LimityCzynszu, limity_k: LimityCzynszu,
 ) -> Decimal:
+    """Sama kwota — patrz `rozstrzygnij_kredyt`, ktore podaje takze ograniczenie."""
+    return rozstrzygnij_kredyt(w, a, g, limity_s, limity_k).kwota
+
+
+def rozstrzygnij_kredyt(
+    w: Wejscie, a: Alokacja, g: Granty,
+    limity_s: LimityCzynszu, limity_k: LimityCzynszu,
+) -> OgraniczenieKredytu:
     """Najwiekszy kredyt, ktory uniesie zakladany czynsz przez caly okres.
 
     Rozdz. 2.2 uzupelnienia specyfikacji: kredyt przestaje byc parametrem
@@ -67,11 +111,11 @@ def kredyt_maksymalny_obslugiwalny(
     ograniczenia wymagany wklad wlasny wychodzilby ujemny.
     """
     if not a.spoleczna.aktywna:
-        return ZERO
+        return _puste_ograniczenie(WIAZE_BRAK_KREDYTU)
     k = w.pula_spoleczna.kredyt
     okresy_splaty = k.okres_lat - k.karencja_lat
     if k.okres_lat <= 0 or okresy_splaty <= 0:
-        return ZERO
+        return _puste_ograniczenie(WIAZE_BRAK_KREDYTU)
     # `udzial_docelowy` w trybie automatycznym nie wyznacza KWOTY — ta bierze sie
     # z udzwigu czynszu — ale nadal rozstrzyga, czy kredyt w ogole wchodzi w gre.
     # Bez tego warunku silnik przyjmowal kredyt, ktorego reszta modelu nie widziala:
@@ -79,7 +123,7 @@ def kredyt_maksymalny_obslugiwalny(
     # grantowa, nie naliczala raty i skracala okres powierzenia. Kredyt obnizal
     # wymagany wklad, a nikt go nie splacal.
     if not k.aktywny:
-        return ZERO
+        return _puste_ograniczenie(WIAZE_BRAK_KREDYTU)
 
     # Projekcja bez kredytu daje przychody i koszty biezace — obie wielkosci
     # nie zaleza od kwoty kredytu, wiec wystarczy policzyc je raz.
@@ -107,7 +151,14 @@ def kredyt_maksymalny_obslugiwalny(
             continue                       # po splacie kredyt nie obciaza juz przeplywu
         nadwyzka = rok.przychod_czynszowy_netto - rok.koszty_operacyjne
         if nadwyzka <= ZERO:
-            return ZERO                    # czynsz nie pokrywa nawet kosztow biezacych
+            # Czynsz nie pokrywa nawet kosztow biezacych — wiaze udzwig, i to
+            # tak mocno, ze nie zostaje nic na zadna rate.
+            return OgraniczenieKredytu(
+                kwota=ZERO, udzwig=ZERO,
+                limit_ustawowy=a.spoleczna.koszty_przedsiewziecia
+                * prawo.KREDYT_MAKSYMALNY_UDZIAL,
+                potrzebny=ZERO, wiazace=WIAZE_UDZWIG,
+            )
         dostepne_na_rate = nadwyzka / bufor
         wspolczynnik = (
             k.oprocentowanie if rok.rok <= k.karencja_lat else annuita_jednostkowa
@@ -117,7 +168,7 @@ def kredyt_maksymalny_obslugiwalny(
         pulapy.append(dostepne_na_rate / wspolczynnik)
 
     if not pulapy:
-        return ZERO
+        return _puste_ograniczenie(WIAZE_BRAK_KREDYTU)
     limit_ustawowy = a.spoleczna.koszty_przedsiewziecia * prawo.KREDYT_MAKSYMALNY_UDZIAL
     # Ile kredytu faktycznie potrzeba po dotacji i partycypacji.
     partycypacja = (
@@ -140,8 +191,22 @@ def kredyt_maksymalny_obslugiwalny(
         - partycypacja
         - rzeczowy_spoleczna
     )
-    return pelne_zlote_w_dol(
-        max(ZERO, min(min(pulapy), limit_ustawowy, potrzebny))
+    udzwig = min(pulapy)
+    # Kolejnosc rozstrzygania przy remisie: potrzeba, limit, udzwig. Gdy dwie
+    # wielkosci wypadaja rowno, uczciwiej jest powiedziec "nie ma czego wiecej
+    # finansowac" niz "podnies czynsz" — druga rada nic by nie dala.
+    kandydaci = (
+        (potrzebny, WIAZE_POTRZEBA),
+        (limit_ustawowy, WIAZE_LIMIT),
+        (udzwig, WIAZE_UDZWIG),
+    )
+    surowa, wiazace = min(kandydaci, key=lambda para: para[0])
+    return OgraniczenieKredytu(
+        kwota=pelne_zlote_w_dol(max(ZERO, surowa)),
+        udzwig=udzwig,
+        limit_ustawowy=limit_ustawowy,
+        potrzebny=potrzebny,
+        wiazace=wiazace,
     )
 
 
@@ -256,6 +321,7 @@ class Wynik:
     edb_kredytu: Decimal
     rekompensata: TestRekompensaty
     werdykty: Werdykty
+    ograniczenie_kredytu: OgraniczenieKredytu
 
     @property
     def ostrzezenia(self) -> Tuple[Ostrzezenie, ...]:
@@ -321,6 +387,30 @@ class Wynik:
             - self.finansowanie.spoleczna.wklad_rzeczowy
         )
         return max(ZERO, laczna - max(ZERO, spoleczna))
+
+    @property
+    def czynsz_prog_bezskutecznosci(self) -> Optional[Decimal]:
+        """Stawka, powyzej ktorej czynsz przestaje obnizac wymagany wklad.
+
+        Pakiet nr 2, rozdz. 5. Kredyt jest minimum z trzech wielkosci; czynsz
+        rusza tylko jedna z nich — udzwig. Gdy udzwig dorownuje mniejszej z dwoch
+        pozostalych, dalsze podnoszenie stawki niczego juz nie zmienia i wykres
+        wchodzi w plateau. Bez tego znacznika uzytkownik przesuwa suwak, widzi,
+        ze nic sie nie dzieje, i nie wie dlaczego.
+
+        Zwraca None, gdy progu nie ma — bo nie ma kredytu albo bo zadna stawka
+        nie doprowadzi udzwigu do pulapu.
+        """
+        o = self.ograniczenie_kredytu
+        if o.udzwig is None:
+            return None
+        pulap = min(o.limit_ustawowy, o.potrzebny)
+        if pulap <= ZERO:
+            return None
+        return czynsz_domykajacy_bez_wkladu(
+            self.wejscie, self.alokacja, self.granty,
+            self.limity_spoleczna, self.limity_komunalna, pulap,
+        )
 
     @property
     def czynsz_domykajacy_jest_hipotetyczny(self) -> bool:
@@ -417,12 +507,15 @@ def przelicz(w: Wejscie) -> Wynik:
         finansowanie_zwrotne=False,
     )
 
+    # Ograniczenie liczone w obu trybach. W automatycznym wyznacza kwote,
+    # w recznym jest samym rozpoznaniem — uzytkownik ma wiedziec, czy wpisana
+    # przez niego kwota miesci sie w udzwigu i w limicie.
+    ograniczenie = rozstrzygnij_kredyt(w, a, g, limity_spoleczna, limity_komunalna)
     if w.przelaczniki.tryb_kredytu is TrybKredytu.AUTOMATYCZNY:
-        kwota_kredytu = kredyt_maksymalny_obslugiwalny(
-            w, a, g, limity_spoleczna, limity_komunalna
-        )
+        kwota_kredytu = ograniczenie.kwota
     else:
         kwota_kredytu = None
+        ograniczenie = replace(ograniczenie, wiazace=WIAZE_RECZNY)
 
     fin = _projekcja.zbuduj_finansowanie(w, a, g, kwota_kredytu=kwota_kredytu)
     proj = _projekcja.build(w, a, fin, limity_spoleczna, limity_komunalna)
@@ -442,6 +535,9 @@ def przelicz(w: Wejscie) -> Wynik:
         edb_kredytu=edb_kredytu,
         rekompensata=rek,
         werdykty=werdykty,
+        # Kwota zawsze ta, ktora naprawde weszla do montazu — w trybie recznym
+        # jest to liczba od uzytkownika, a pulapy zostaja jako punkt odniesienia.
+        ograniczenie_kredytu=replace(ograniczenie, kwota=fin.spoleczna.kredyt),
     )
 
 

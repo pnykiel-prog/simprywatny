@@ -792,3 +792,75 @@ najbliższym przybliżeniem, jakie da się zbudować bez tej danej: gdyby okres
 rozliczeniowy był dwuletni albo pięcioletni, punkty pomiaru byłyby rzadsze,
 a wynik nieco łagodniejszy. Ostrzeżenie `ZALOZENIE_OKRES_ROZLICZENIOWY_NADWYZKI`
 zostaje.
+
+---
+
+## 21. Trzy uzupełnienia warstwy prezentacji
+
+**Status: uzupełnienia, nie luki. Żadne nie zmienia liczby — zmieniają to, czy
+z liczby da się coś wyczytać.**
+
+### 21.1. Co ogranicza kwotę kredytu
+
+Kredyt jest minimum z trzech wielkości: udźwigu czynszowego, limitu 80%
+(art. 15b ust. 2) i faktycznej potrzeby po dotacji, partycypacji i wkładzie
+rzeczowym. Czynsz rusza tylko jedną z nich. Gdy wiąże potrzeba, podnoszenie
+stawki niczego nie zmienia — bez podania przyczyny zachowanie narzędzia wygląda
+na awarię.
+
+Silnik zwraca teraz `OgraniczenieKredytu` z nazwą wiążącej wielkości i wszystkimi
+trzema pułapami. Kaskada niesie wskaźnik przy słupku kredytu, arkusz — sekcję
+„CO OGRANICZA KWOTĘ KREDYTU" z własną formułą rozstrzygającą (test sprawdza, że
+obie warstwy nazywają to samo).
+
+Kolejność rozstrzygania przy remisie: potrzeba, limit, udźwig. Gdy dwie
+wielkości wypadają równo, uczciwiej powiedzieć „nie ma czego więcej finansować"
+niż „podnieś czynsz" — druga rada nic by nie dała.
+
+### 21.2. Próg bezskuteczności czynszu
+
+Stawka, powyżej której wkład własny przestaje reagować na czynsz. Liczona jako
+odwrócenie wymiarowania kredytu przy pułapie równym `min(limit, potrzeba)` —
+czyli stawka, przy której udźwig dorównuje temu, co i tak ogranicza kwotę.
+
+W scenariuszu wzorcowym wynosi **24,01 zł**. Powyżej niej wkład stoi na
+**1,7 mln zł** — to `luka_poza_zasiegiem_czynszu`, część, której żaden czynsz nie
+domknie, bo pula komunalna nie ma kredytu (art. 5a ust. 3), a tylko kredyt
+zamienia przyszły czynsz na kapitał początkowy.
+
+Uwaga redakcyjna: próg i tak zwana luka poza zasięgiem mówią o tym samym
+plateau, więc idą **jednym** zdaniem pod wykresem, nie dwoma akapitami z tą samą
+kwotą. Na wykresie zostaje znacznik z podpowiedzią po najechaniu.
+
+**Most między dwoma wykresami.** Wielkość plateau rośnie wprost z udziałem puli
+komunalnej: przy 0% wynosi zero, przy 100% pochłania cały wkład. Wykres
+negocjacyjny pokazuje to jako zacieniowaną warstwę pod linią wkładu — odstęp
+między nią a linią to część, którą da się zdjąć podnosząc stawkę.
+
+| udział komunalny | wkład wymagany | z tego poza zasięgiem czynszu |
+|---|---|---|
+| 0% | 1 216 984 zł | 0 zł |
+| 40% | 3 054 191 zł | 2 324 000 zł |
+| 100% | 5 810 000 zł | 5 810 000 zł |
+
+### 21.3. Wkład rzeczowy inwestora
+
+Rozstrzygnięcie na rzecz `wklad_gotowkowy_wymagany` (luka nr 1 audytu) było
+słuszne i zostaje: gdy działkę wnosi gmina, inwestor faktycznie nie wykłada tych
+pieniędzy. Ale przy formie **„inwestor wnosi aportem"** ten sam mechanizm
+pokazywał samą gotówkę, przemilczając działkę oddaną do spółki.
+
+Kaskada rozróżnia teraz, **kto** wnosi grunt rzeczowo. Przy aporcie inwestora
+nagłówek podaje dwie liczby i sumę:
+
+> Twój wkład: 903 tys. zł w gotówce plus działka warta 2,8 mln zł. Łącznie
+> 3,7 mln zł, czyli 13% kosztów.
+
+Kafelek testu 1 pokazuje wtedy kwotę łączną z rozbiciem w podpisie. Grunt
+wniesiony przez gminę do tej sumy nie wchodzi — to nie jest wkład inwestora.
+
+**Uwaga do testu z pakietu.** Pakiet proponował porównać dwa scenariusze różniące
+się wyłącznie formą aportu — inwestora i gminy. Aport gminy został usunięty
+z zakresu (rozdz. 17), więc test porównuje aport inwestora z nabyciem od gminy
+i z dzierżawą: te same koszty, ta sama kwota gotówkowa tam, gdzie ma być ta sama,
+i wkład łączny większy wyłącznie przy aporcie inwestora.

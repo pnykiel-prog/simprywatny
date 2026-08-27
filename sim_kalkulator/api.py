@@ -24,6 +24,7 @@ import yaml
 
 from . import arkusz as _arkusz
 from . import prawo
+from . import silnik as _silnik
 from . import wrazliwosc as _wrazliwosc
 from .dane import BladObliczenia, BladWalidacji, FormaGruntu, TrybKredytu, zbuduj
 from .silnik import Wynik, przelicz
@@ -300,10 +301,17 @@ def _kaskada(r: Wynik) -> Dict[str, Any]:
             f"{_kwota_slownie(g.grant_utracony)}."
         )
 
+    kredyt = {
+        "etykieta": "Kredyt",
+        "kwota": _liczba(-f.kredyt_laczny),
+        "rodzaj": "odjecie",
+    }
+    kredyt.update(_ograniczenie_kredytu(r))
+
     kroki = [
         {"etykieta": "Koszt inwestycji", "kwota": _liczba(f.koszty_laczne), "rodzaj": "suma"},
         dotacja,
-        {"etykieta": "Kredyt", "kwota": _liczba(-f.kredyt_laczny), "rodzaj": "odjecie"},
+        kredyt,
         {"etykieta": "Partycypacja", "kwota": _liczba(-f.partycypacja_laczna),
          "rodzaj": "odjecie"},
     ]
@@ -323,10 +331,24 @@ def _kaskada(r: Wynik) -> Dict[str, Any]:
         })
     kroki.append({"etykieta": "Twój wkład", "kwota": _liczba(wymagany), "rodzaj": "wynik"})
 
+    # Grunt wniesiony przez INWESTORA to nadal jego wklad — nie wyklada na niego
+    # gotowki, ale oddaje spolce majatek. Pakiet nr 2, rozdz. 6: pokazanie samej
+    # gotowki przy aporcie inwestora zanizyloby jego rzeczywisty wklad
+    # kilkukrotnie. Grunt wniesiony przez gmine do tej sumy nie wchodzi.
+    rzeczowy_inwestora = f.wklad_rzeczowy_inwestora_laczny
+    laczny = wymagany + rzeczowy_inwestora
+
     if nadwyzka > ZERO:
         zdanie = (
             f"Nie musisz dokładać gotówki. Dotacja i wniesiony grunt domykają montaż "
             f"z zapasem {_kwota_slownie(nadwyzka)}."
+        )
+    elif rzeczowy_inwestora > ZERO:
+        zdanie = (
+            f"Twój wkład: {_kwota_slownie(wymagany)} w gotówce plus działka warta "
+            f"{_kwota_slownie(rzeczowy_inwestora)}. Łącznie "
+            f"{_kwota_slownie(laczny)}, czyli "
+            f"{bezpieczny_iloraz(laczny, f.koszty_laczne):.0%} kosztów."
         )
     else:
         zdanie = (
@@ -337,11 +359,60 @@ def _kaskada(r: Wynik) -> Dict[str, Any]:
     return {
         "kroki": kroki,
         "wymagany": _liczba(wymagany),
+        "wklad_rzeczowy_inwestora": _liczba(rzeczowy_inwestora),
+        "wklad_laczny": _liczba(laczny),
+        "udzial_lacznego_w_kosztach": _liczba(
+            bezpieczny_iloraz(laczny, f.koszty_laczne)
+        ),
         "nadwyzka_rzeczowa": _liczba(nadwyzka),
         "udzial_w_kosztach": udzial,
         "dostepny": _liczba(dostepny),
         "roznica": _liczba(dostepny - wymagany) if dostepny is not None else None,
         "zdanie": zdanie,
+    }
+
+
+def _ograniczenie_kredytu(r: Wynik) -> Dict[str, Any]:
+    """Co ogranicza kwote kredytu i czy czynsz jest tu jeszcze dzwignia.
+
+    Pakiet nr 2, rozdz. 4. Kredyt jest minimum z trzech wielkosci, a czynsz rusza
+    tylko jedna z nich. Bez tej informacji zachowanie narzedzia — suwak sie
+    przesuwa, kwota stoi — wyglada na awarie.
+    """
+    o = r.ograniczenie_kredytu
+    zdania = {
+        _silnik.WIAZE_POTRZEBA: (
+            "domyka resztę",
+            "Kredyt domyka resztę. Wyższy czynsz nic tu nie zmieni — nie ma czego "
+            "więcej finansować.",
+        ),
+        _silnik.WIAZE_UDZWIG: (
+            "ogranicza czynsz",
+            "Kredyt ograniczony wysokością czynszu. Podniesienie stawki zwiększy "
+            "kredyt i obniży Twój wkład.",
+        ),
+        _silnik.WIAZE_LIMIT: (
+            "limit ustawowy",
+            f"Kredyt na maksimum dopuszczonym przepisami — "
+            f"{prawo.KREDYT_MAKSYMALNY_UDZIAL:.0%} kosztów.",
+        ),
+        _silnik.WIAZE_RECZNY: (
+            "kwota od Ciebie",
+            "Kwotę kredytu ustawiasz samodzielnie. Przełącz tryb na automatyczny, "
+            "żeby narzędzie policzyło największy kredyt, który uniesie ten czynsz.",
+        ),
+    }
+    if o.wiazace not in zdania:
+        return {}
+    etykieta, zdanie = zdania[o.wiazace]
+    return {
+        "wiazace": o.wiazace,
+        "wiazace_etykieta": etykieta,
+        "wiazace_zdanie": zdanie,
+        "czynsz_jest_dzwignia": o.czynsz_jest_dzwignia,
+        "udzwig": _liczba(o.udzwig),
+        "limit_ustawowy": _liczba(o.limit_ustawowy),
+        "potrzebny": _liczba(o.potrzebny),
     }
 
 
@@ -449,11 +520,13 @@ def _czynsz_poziomy(r: Wynik) -> Dict[str, Any]:
     # na kapital poczatkowy. Etykieta "wymagany" bez tego zastrzezenia obiecuje
     # wiecej, niz stawka moze dac.
     poza_zasiegiem = r.luka_poza_zasiegiem_czynszu
+    prog = _prog_bezskutecznosci(r)
     return {
         "wiersze": wiersze,
+        "prog_bezskutecznosci": prog,
         "poza_zasiegiem_czynszu": _liczba(poza_zasiegiem),
         "czynsz_domykajacy_hipotetyczny": r.czynsz_domykajacy_jest_hipotetyczny,
-        "zastrzezenie_do_wymaganego": _zastrzezenie_do_wymaganego(r, poza_zasiegiem),
+        "zastrzezenie_do_wymaganego": _zastrzezenie_do_wymaganego(r, poza_zasiegiem, prog),
         "rynek_podano": rynek.podano,
         "rynek_zrodlo": rynek.zrodlo,
         "rynek_data": rynek.data.isoformat() if rynek.data else None,
@@ -463,19 +536,61 @@ def _czynsz_poziomy(r: Wynik) -> Dict[str, Any]:
     }
 
 
-def _zastrzezenie_do_wymaganego(r: Wynik, poza_zasiegiem: Decimal) -> str:
-    """Co "czynsz wymagany" znaczy naprawde i czego nie obejmuje."""
+def _prog_bezskutecznosci(r: Wynik) -> Optional[Dict[str, Any]]:
+    """Trzeci znacznik na wykresie czynszowym — pakiet nr 2, rozdz. 5.
+
+    Powyzej tej stawki wkład wlasny przestaje reagowac na czynsz. Powod nie jest
+    oczywisty: kredyt jest minimum z trzech wielkosci, a czynsz rusza tylko
+    udzwig; gdy udzwig dorownuje potrzebie albo limitowi, plateau. Znacznik
+    stawia sie w wierszu spolecznym, bo tylko tam czynsz cokolwiek finansuje.
+    """
+    prog = r.czynsz_prog_bezskutecznosci
+    if prog is None or prog <= ZERO or not r.projekcja.spoleczna.aktywna:
+        return None
+    o = r.ograniczenie_kredytu
+    if o.wiazace == _silnik.WIAZE_RECZNY:
+        return None
+    return {
+        "stawka": _liczba(prog),
+        "pula": "spoleczna",
+        "osiagniety": r.limity_spoleczna.czynsz_zakladany_m2_mies >= prog,
+        # Krotki opis na hover przy znaczniku. Pelne zdanie z kwota plateau idzie
+        # do zastrzezenia pod wykresem — inaczej ta sama liczba stalaby dwa razy.
+        "opis": (
+            f"Powyżej {_dziesietnie(prog)} zł czynsz przestaje obniżać wymagany wkład: "
+            "kredytu nie ogranicza już stawka, tylko potrzeba albo limit ustawowy."
+        ),
+    }
+
+
+def _zastrzezenie_do_wymaganego(
+    r: Wynik, poza_zasiegiem: Decimal, prog: Optional[Dict[str, Any]],
+) -> str:
+    """Co "czynsz wymagany" znaczy naprawde i czego nie obejmuje.
+
+    Prog bezskutecznosci wchodzi TU, a nie osobnym akapitem: obie uwagi mowia
+    o tym samym plateau, wiec rozdzielone powtarzalyby te sama kwote.
+    """
     if r.czynsz_domykajacy_jest_hipotetyczny:
         return (
             "Kredyt ustawiasz samodzielnie, więc podniesienie czynszu go nie zmieni — "
             "stawka wymagana opisuje wariant, w którym kredyt dopasowałby się do luki. "
             "Przełącz kredyt na automatyczny, żeby ta liczba była osiągalna."
         )
+    wstep = (
+        f"Powyżej {_dziesietnie(prog['stawka'])} zł czynsz przestaje pomagać. "
+        if prog else ""
+    )
     if poza_zasiegiem > ZERO:
         return (
-            f"Nawet przy tej stawce zostaje {_kwota_slownie(poza_zasiegiem)} do wyłożenia: "
+            f"{wstep}Zostaje {_kwota_slownie(poza_zasiegiem)} do wyłożenia: "
             "mieszkania komunalne nie mają kredytu, więc ich brakującego kapitału nie da "
             "się zamienić na czynsz."
+        )
+    if wstep:
+        return (
+            f"{wstep}Kredyt pokrywa wtedy całą resztę kosztów — nie ma czego więcej "
+            "finansować, więc wyższa stawka nie obniży Twojego wkładu."
         )
     return ""
 
@@ -1202,6 +1317,12 @@ def sweep_json(w) -> Dict[str, Any]:
         # ktora dziala, zamiast swiecic na czerwono na calej szerokosci.
         "blokada_niezalezna_od_osi": analiza.sweep.blokada_niezalezna_od_osi,
         "dzwignia_poza_osia": _dzwignia_poza_osia(w, analiza.sweep.blokada_niezalezna_od_osi),
+        "podpis_rozbicia_wkladu": (
+            "Zacieniowana warstwa u dołu to wkład, którego czynsz nie ruszy — mieszkania "
+            "komunalne nie mają kredytu, a tylko kredyt zamienia przyszły czynsz na kapitał "
+            "początkowy. Rośnie wprost z udziałem gminy. Odstęp między nią a linią to "
+            "część, którą da się zdjąć podnosząc stawkę."
+        ),
         "punkty": [
             {
                 "udzial": _liczba(p.udzial),
@@ -1210,6 +1331,12 @@ def sweep_json(w) -> Dict[str, Any]:
                 "werdykty": list(p.werdykty),
                 "wiazace_ograniczenie": p.wiazace_ograniczenie,
                 "wklad_wymagany": _liczba(p.wklad_wymagany),
+                # Rozbicie wkladu na czesc do zdjecia czynszem i reszte, ktorej
+                # zaden czynsz nie ruszy (pakiet nr 2, rozdz. 5). To jest most
+                # miedzy wykresem czynszowym a negocjacyjnym: plateau na jednym
+                # rosnie dokladnie tak, jak dolna warstwa slupka na drugim.
+                "wklad_poza_zasiegiem": _liczba(p.wklad_poza_zasiegiem_czynszu),
+                "wklad_do_domkniecia_czynszem": _liczba(p.wklad_do_domkniecia_czynszem),
                 "czynsz_domykajacy": _liczba(p.czynsz_domykajacy),
                 "miesci_sie_w_rynku": p.miesci_sie_w_rynku,
                 "powod": p.powod_niepoliczalnosci,

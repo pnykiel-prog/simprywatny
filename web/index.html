@@ -398,16 +398,22 @@ function rysujKaskade(k){
   const BAZA = H - DOL;
   const barwy = ["var(--neutral)", "var(--s1)", "var(--s2)", "var(--s3)", "var(--s7)"];
 
-  // linia progowa zadeklarowanego kapitalu
-  if (k.dostepny != null){
+  // Linia progowa zadeklarowanego kapitalu. Rysowana PO slupkach, na koncu —
+  // pierwszy slupek siega calej wysokosci wykresu i zaslanialby etykiete.
+  const rysujKapital = () => {
+    if (k.dostepny == null) return;
     const y = BAZA - skala(k.dostepny);
     svg.appendChild(el("line", {x1:L, y1:y, x2:W-R, y2:y, stroke:"var(--tekst-3)",
       "stroke-width":1.5, "stroke-dasharray":"5 4"}));
     // Etykieta po lewej: po prawej stoi slupek wyniku i jego wartosc, a linia
     // kapitalu przecina go dokladnie tam, gdzie ta wartosc jest wypisana.
-    svg.appendChild(el("text", {x:L+3, y:y-5, "text-anchor":"start", class:"os",
-      fill:"var(--tekst-2)"}, "Twój kapitał: " + mln(k.dostepny)));
-  }
+    const t = el("text", {x:L+3, y:y-5, "text-anchor":"start", class:"os",
+      fill:"var(--tekst-2)"}, "Twój kapitał: " + mln(k.dostepny));
+    // Podkladka, zeby napis czytal sie takze na tle slupka.
+    svg.appendChild(el("rect", {x:L, y:y-16, width:132, height:14, rx:2,
+      fill:"var(--karta)", opacity:".85"}));
+    svg.appendChild(t);
+  };
 
   let biezace = 0;
   kroki.forEach((krok, i) => {
@@ -429,6 +435,14 @@ function rysujKaskade(k){
     if (krok.rodzaj === "wynik")
       g.appendChild(el("text", {x:x+slupek/2, y:BAZA+30, "text-anchor":"middle",
         class:"os", fill:"var(--s7)"}, "= odpowiedź"));
+    // Wskaźnik ograniczenia wiążącego przy słupku kredytu. Nazwa i zdanie
+    // przychodzą z serwera — przeglądarka nie rozstrzyga, co wiąże.
+    if (krok.wiazace_etykieta){
+      const podswietl = krok.czynsz_jest_dzwignia ? "var(--s2)" : "var(--tekst-3)";
+      g.appendChild(el("text", {x:x+slupek/2, y:BAZA+30, "text-anchor":"middle",
+        class:"os", fill:podswietl}, "▲ " + krok.wiazace_etykieta));
+      tytulHover(g, krok.wiazace_zdanie);
+    }
     svg.appendChild(g);
 
     // Szary słupek "utracone" tuż obok dotacji — ile dotacji przepada przez
@@ -456,12 +470,15 @@ function rysujKaskade(k){
     }
   });
   svg.appendChild(el("line", {x1:L, y1:BAZA, x2:W-R, y2:BAZA, class:"siatka"}));
+  rysujKapital();
 
   let zdanie = k.zdanie;
   if (k.roznica != null)
     zdanie += k.roznica >= 0
       ? ` Zostaje zapas ${mln(k.roznica)}.`
       : ` Brakuje ${mln(-k.roznica)}.`;
+  const kredyt = kroki.find(x => x.wiazace_zdanie);
+  if (kredyt) zdanie += " " + kredyt.wiazace_zdanie;
   $("#p-kaskada").textContent = zdanie;
 }
 
@@ -498,6 +515,32 @@ function rysujNegocjacje(s, biezacyUdzial){
     svg.appendChild(el("text", {x:x(u), y:H-DOL+15, "text-anchor":"middle", class:"os"},
       proc(u)));
   });
+
+  // Dolna warstwa — część wkładu, której żaden czynsz nie ruszy. Rośnie wprost
+  // z udziałem gminy, bo pula komunalna nie ma kredytu. To ten sam mechanizm,
+  // który na wykresie czynszowym daje próg bezskuteczności.
+  const zPoza = pkt.filter(p => p.wklad_poza_zasiegiem != null);
+  if (zPoza.length === pkt.length && zPoza.some(p => p.wklad_poza_zasiegiem > 0)){
+    const dolne = pkt.map((p,i) =>
+      (i ? "L" : "M") + x(p.udzial).toFixed(1) + " " + y(p.wklad_poza_zasiegiem).toFixed(1)
+    ).join(" ");
+    const zamkniecie = " L" + x(pkt[pkt.length-1].udzial).toFixed(1) + " " + y(0).toFixed(1)
+      + " L" + x(pkt[0].udzial).toFixed(1) + " " + y(0).toFixed(1) + " Z";
+    const gp = el("g", {});
+    gp.appendChild(el("path", {d: dolne + zamkniecie, fill:"var(--s1)", opacity:".18",
+      stroke:"none"}));
+    gp.appendChild(el("path", {d: dolne, fill:"none", stroke:"var(--s1)",
+      "stroke-width":1.5, "stroke-dasharray":"4 3"}));
+    tytulHover(gp, s.podpis_rozbicia_wkladu || "");
+    svg.appendChild(gp);
+    // Podpis WEWNATRZ zacieniowanego pasma, nie przy jego krawedzi — przy
+    // krawedzi wchodzil na linie wkladu i na jej punkty.
+    const srodek = pkt[Math.floor(pkt.length * 0.72)];
+    if (srodek && srodek.wklad_poza_zasiegiem > 0)
+      svg.appendChild(el("text", {x:x(srodek.udzial),
+        y:(y(srodek.wklad_poza_zasiegiem) + y(0)) / 2, "text-anchor":"middle",
+        class:"os", fill:"var(--tekst-2)"}, "czynsz tego nie ruszy"));
+  }
 
   const d = pkt.map((p,i) => (i ? "L" : "M") + x(p.udzial).toFixed(1) + " " + y(p.wklad_wymagany).toFixed(1)).join(" ");
   svg.appendChild(el("path", {d, fill:"none", stroke:"var(--s1)", "stroke-width":2,
@@ -542,6 +585,14 @@ function rysujNegocjacje(s, biezacyUdzial){
   const zd = document.createElement("div");
   zd.textContent = s.podsumowanie;
   podpisN.appendChild(zd);
+  if (zPoza.length === pkt.length && zPoza.some(p => p.wklad_poza_zasiegiem > 0)
+      && s.podpis_rozbicia_wkladu){
+    const r2 = document.createElement("div");
+    r2.className = "info";
+    r2.style.marginTop = "6px";
+    r2.textContent = s.podpis_rozbicia_wkladu;
+    podpisN.appendChild(r2);
+  }
   // Gdy test blokujący nie zależy od tej osi, samo czerwone tło niczego nie mówi.
   // Nazywamy przyczynę i prowadzimy do sekcji, w której da się coś zrobić.
   if (s.blokada_niezalezna_od_osi && s.dzwignia_poza_osia && s.dzwignia_poza_osia.opis){
@@ -577,7 +628,7 @@ function rysujNegocjacje(s, biezacyUdzial){
    w komunalnej najemcą jest gmina. */
 function rysujCzynsz(c){
   const svg = $("#w-czynsz"); czysc(svg);
-  const W = 620, L = 150, R = 84, GORA = 16, WYS_W = 62;
+  const W = 620, L = 150, R = 84, GORA = 26, WYS_W = 62;
   const wiersze = c.wiersze || [];
   const H = Math.max(120, GORA + wiersze.length * WYS_W + 46);
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
@@ -592,6 +643,9 @@ function rysujCzynsz(c){
   const wartosci = [];
   wiersze.forEach(w => [w.przyjety, w.wymagany, w.limit, w.rynkowy]
     .forEach(v => { if (v != null) wartosci.push(v); }));
+  // Próg bezskuteczności wchodzi do skali, żeby nie wypadł poza wykres.
+  const prog = c.prog_bezskutecznosci;
+  if (prog && prog.stawka != null) wartosci.push(prog.stawka);
   const maks = Math.max(...wartosci) * 1.12 || 1;
   const x = (v) => L + (W-L-R) * (v/maks);
 
@@ -656,6 +710,21 @@ function rysujCzynsz(c){
       svg.appendChild(el("text", {x:xp, y:gora + (blisko ? 68 : 56), "text-anchor":"middle",
         class:"os", fill:"var(--uwaga)"},
         "po progu " + zl2(w.prog_sasiedni.limit_po_progu)));
+    }
+
+    // Trzeci znacznik — próg bezskuteczności. Powyżej tej stawki czynsz
+    // przestaje obniżać wkład własny, bo kredytu ogranicza już coś innego.
+    if (prog && prog.pula === w.pula && prog.stawka != null){
+      const xb = x(prog.stawka);
+      const gb = el("g", {});
+      gb.appendChild(el("line", {x1:xb, y1:gora+2, x2:xb, y2:gora+42,
+        stroke:"var(--neutral)", "stroke-width":2, "stroke-dasharray":"1 3"}));
+      gb.appendChild(el("circle", {cx:xb, cy:gora+2, r:3, fill:"var(--neutral)"}));
+      tytulHover(gb, prog.opis);
+      svg.appendChild(gb);
+      if (i === 0)
+        svg.appendChild(el("text", {x:xb, y:gora-4, "text-anchor":"middle", class:"os",
+          fill:"var(--neutral)"}, "bez efektu od " + zl2(prog.stawka)));
     }
 
     // linia przerywana — stawka rynkowa; tylko wiersz społeczny może ją mieć
@@ -888,7 +957,10 @@ function pokazBlad(tekst){
 function rysujWerdykty(w){
   const kaskada = w.wykresy.kaskada;
   const opisy = {
-    1: {liczba: mln(kaskada.wymagany), opis: "wymagany wkład własny"},
+    1: kaskada.wklad_rzeczowy_inwestora
+      ? {liczba: mln(kaskada.wklad_laczny),
+         opis: "wkład łączny: " + mln(kaskada.wymagany) + " w gotówce plus działka"}
+      : {liczba: mln(kaskada.wymagany), opis: "wymagany wkład własny"},
     2: {liczba: null, opis: ""},
     3: {liczba: null, opis: ""},
   };
